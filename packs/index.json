@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "packs": [
+    {
+      "name": "hygiene",
+      "description": "Editor and merge leftovers stay out of the repository.",
+      "suits": ["application", "library", "documentation"],
+      "path": "hygiene.json",
+      "sha256": "bccc085551d19dcea7bf1ba18c509ec71adccd98f9837409cd76045835f2a754"
+    },
+    {
+      "name": "secrets",
+      "description": "Credential files, private keys and access tokens are refused.",
+      "suits": ["application", "library", "documentation"],
+      "path": "secrets.json",
+      "sha256": "9131509b824614233f4f5124492a5e7aa8cd55831b47cc426b02794332d327c3"
+    },
+    {
+      "name": "conventional-commits",
+      "description": "Title-only Conventional Commits with the default types.",
+      "suits": ["application", "library", "documentation"],
+      "path": "conventional-commits.json",
+      "sha256": "a230c3e373984c384554b7aff88bc23b478aa345b1f82e207c37e013b6a06ca1"
+    },
+    {
+      "name": "open-source",
+      "description": "A published project keeps its licence and its readme.",
+      "suits": ["library"],
+      "path": "open-source.json",
+      "sha256": "c88c246a950aa9a2afbc38bb19e9253c590f96321bd6021b99413c2114a4486f"
+    }
+  ]
+}

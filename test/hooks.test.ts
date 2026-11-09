@@ -16,8 +16,8 @@ import test, { type TestContext } from "node:test";
 import { assetsFor, checkAssets, syncAssets } from "../src/assets.ts";
 import { main } from "../src/cli.ts";
 import { definePlumb } from "../src/config.ts";
-import { checkHooks, hookFiles } from "../src/hooks.ts";
-import { parseReport } from "./support.ts";
+import { checkHookManager, checkHooks, hookFiles } from "../src/hooks.ts";
+import { parseReport, testContext } from "./support.ts";
 
 const command = ["bun", "--no-env-file", "tools/plumb/bin/plumb.mjs"];
 
@@ -158,5 +158,120 @@ await test("the doctor command includes the hooks check", async (t) => {
       (item) => item.rule === "generated.drift" && item.path === ".githooks/pre-commit",
     ),
     true,
+  );
+});
+
+const PLUMB = "bun --no-env-file tools/plumb/bin/plumb.mjs";
+
+function managed(t: TestContext, manager: string, files: Record<string, string>) {
+  const root = fixture(t);
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(join(root, path, ".."), { recursive: true });
+    writeFileSync(join(root, path), content);
+  }
+  const config = configure({ hooks: { command, manager }, commits: {} });
+  return checkHookManager(testContext({ root, config })).map((item) => [
+    item.rule,
+    item.path,
+    item.status,
+  ]);
+}
+
+await test("a hook manager keeps its own files and must run the exact policy invocation", (t) => {
+  const config = configure({ hooks: { command, manager: "husky" }, commits: {} });
+  // a manager owns its hook files, so nothing is generated for it
+  assert.deepEqual(hookFiles(config, "# header"), []);
+  assert.deepEqual(
+    managed(t, "husky", {
+      ".husky/pre-commit": `npx lint-staged\n${PLUMB} check\n`,
+      ".husky/commit-msg": `exec ${PLUMB} commit-msg "$1"\n`,
+    }),
+    [],
+  );
+  assert.deepEqual(
+    managed(t, "lefthook", {
+      "lefthook.yml": `pre-commit:\n  commands:\n    plumb:\n      run: ${PLUMB} check\ncommit-msg:\n  commands:\n    plumb:\n      run: ${PLUMB} commit-msg {1}\n`,
+    }),
+    [],
+  );
+  assert.deepEqual(
+    managed(t, "pre-commit", {
+      ".pre-commit-config.yaml": `repos:\n  - repo: local\n    hooks:\n      - id: plumb\n        entry: "${PLUMB} check"\n      - id: plumb-message\n        entry: ${PLUMB} commit-msg\n`,
+    }),
+    [],
+  );
+});
+
+await test("a weakened, commented or missing manager invocation never passes", (t) => {
+  const message = `${PLUMB} commit-msg "$1"\n`;
+  for (const line of [
+    `# ${PLUMB} check`,
+    `${PLUMB} check || true`,
+    `${PLUMB} check --observe`,
+    `${PLUMB} --observe check`,
+    `echo ${PLUMB} check`,
+    `${PLUMB} check; exit 0`,
+    `${PLUMB} plan`,
+    "",
+  ]) {
+    assert.deepEqual(
+      managed(t, "husky", { ".husky/pre-commit": `${line}\n`, ".husky/commit-msg": message }),
+      [["hooks.manager", ".husky/pre-commit", "violation"]],
+      line,
+    );
+  }
+  // the commit-msg hook is required once commits are policy; a file that is absent is incomplete
+  assert.deepEqual(managed(t, "husky", { ".husky/pre-commit": `${PLUMB} check\n` }), [
+    ["hooks.manager", "plumb.json", "incomplete"],
+  ]);
+  assert.deepEqual(managed(t, "lefthook", {}), [
+    ["hooks.manager", "plumb.json", "incomplete"],
+    ["hooks.manager", "plumb.json", "incomplete"],
+  ]);
+  assert.throws(
+    () => configure({ hooks: { command, manager: "lefthook", path: ".hooks" } }),
+    /hooks\.path/,
+  );
+});
+
+await test("doctor accepts the manager's own install and reports a clone without it", async (t) => {
+  const root = fixture(t);
+  git(root, "init", "-q");
+  const husky = configure({ hooks: { command, manager: "husky" } }),
+    lefthook = configure({ hooks: { command, manager: "lefthook" } });
+  assert.equal((await checkHooks(husky, root))[0]?.rule, "hooks.unset");
+  for (const path of [".husky", ".husky/_"]) {
+    git(root, "config", "core.hooksPath", path);
+    assert.deepEqual(await checkHooks(husky, root), []);
+  }
+  git(root, "config", "--unset", "core.hooksPath");
+  const missing = await checkHooks(lefthook, root);
+  assert.deepEqual(
+    missing.map((item) => [item.rule, item.remedy]),
+    [["hooks.unset", "Run lefthook install in this clone."]],
+  );
+  writeFileSync(join(root, ".git/hooks/pre-commit"), "#!/bin/sh\n");
+  assert.deepEqual(await checkHooks(lefthook, root), []);
+});
+
+await test("check reports a manager that does not run the policy", async (t) => {
+  const root = fixture(t);
+  writeFileSync(
+    join(root, "plumb.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      preset: "portable",
+      hooks: { command: ["plumb"], manager: "pre-commit" },
+    }),
+  );
+  writeFileSync(join(root, ".pre-commit-config.yaml"), "repos: []\n");
+  let text = "";
+  const code = await main(["check", "--root", root, "--format", "json"], (chunk) => {
+    text += chunk;
+  });
+  assert.equal(code, 1);
+  assert.deepEqual(
+    parseReport(text).diagnostics.map((item) => item.rule),
+    ["hooks.manager"],
   );
 });

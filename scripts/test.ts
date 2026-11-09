@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const mode = process.argv[2] ?? "all";
 
-if (!["all", "core", "javascript", "unit", "native", "python"].includes(mode)) {
-  throw new Error("Test suite is all, core, javascript, unit, native, or python");
+if (!["all", "core", "javascript", "unit", "native", "python", "adapters"].includes(mode)) {
+  throw new Error("Test suite is all, core, javascript, unit, native, python, or adapters");
 }
 
 // all runs every suite that needs no native toolchain; native runs in its own CI job
 if (mode === "all") {
-  for (const suite of ["core", "javascript", "python"]) {
+  for (const suite of ["core", "javascript", "python", "adapters"]) {
     const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), suite], {
       stdio: "inherit",
     });
@@ -22,21 +22,23 @@ if (mode === "all") {
     }
   }
 } else {
-  const folder = join(
-    root,
+  const folders =
     mode === "core"
-      ? "test"
+      ? ["test"]
       : mode === "native"
-        ? "test/integration"
+        ? ["test/integration"]
         : mode === "python"
-          ? "packages/python/test"
-          : "packages/javascript/test",
+          ? ["packages/python/test"]
+          : mode === "adapters"
+            ? ["packages/sdk/test", "packages/go/test"]
+            : ["packages/javascript/test"];
+  const files = folders.flatMap((folder) =>
+    readdirSync(join(root, folder))
+      .filter(
+        (file) => file.endsWith(".test.ts") && (mode !== "unit" || file === "lint-unit.test.ts"),
+      )
+      .map((file) => join(root, folder, file)),
   );
-  const files = readdirSync(folder)
-    .filter(
-      (file) => file.endsWith(".test.ts") && (mode !== "unit" || file === "lint-unit.test.ts"),
-    )
-    .map((file) => join(folder, file));
   const temporary = process.env.PLUMB_TEST_TMP ?? resolve(root, "../.plumb-tests");
   mkdirSync(temporary, { recursive: true });
   const result = spawnSync(process.execPath, ["--test", ...files], {

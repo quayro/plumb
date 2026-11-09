@@ -1,18 +1,32 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 import { diffPolicies } from "./bundles.ts";
 import { argumentsOf, type CliOptions, USAGE } from "./cli-arguments.ts";
-import { commitCheck, discover, init, issue, mutation, saveOutput } from "./cli-commands.ts";
+import {
+  baseline,
+  commitCheck,
+  discover,
+  issue,
+  mutation,
+  progress,
+  saveOutput,
+  upgrade,
+} from "./cli-commands.ts";
 import { loadConfig, schema, validateSchema } from "./config.ts";
+import { conformance } from "./conformance.ts";
 import { isDiagnostic, isStatus, toSarif } from "./diagnostics.ts";
 import {
+  checkerIdentity,
   checkRepository,
   context,
   coreRules,
+  describeRule,
   doctor,
   inspect,
+  packageRoot,
   planRepository,
   report,
   scaffoldRepository,
@@ -20,7 +34,14 @@ import {
 } from "./engine.ts";
 import { errorMessage } from "./errors.ts";
 import { digest, globMatches, normalize, protectedPolicyFiles } from "./files.ts";
+import { init } from "./init.ts";
 import { inputDigest } from "./inputs.ts";
+import { vendor, verifyInstall } from "./install.ts";
+import { instructions } from "./instructions.ts";
+import { serveEditor } from "./lsp.ts";
+import { serve } from "./mcp.ts";
+import { exportPacks, listPacks } from "./packs.ts";
+import { gitTop } from "./ratchet.ts";
 import { at, isArray } from "./schema.ts";
 
 type Output = Record<string, unknown>;
@@ -51,7 +72,7 @@ export async function main(
   }
   let options: CliOptions | undefined, result: Output;
   try {
-    const parsed = argumentsOf(args);
+    const parsed = argumentsOf(args[0] === "--version" ? ["version", ...args.slice(1)] : args);
     if (parsed.configFile && normalize(parsed.configFile) !== "plumb.json") {
       // a policy outside plumb.json can be swapped by the change under review, so CI and base
       // comparisons refuse it.
@@ -71,9 +92,59 @@ export async function main(
         : await discover(process.cwd(), parsed.configFile ?? "plumb.json"),
     };
     switch (options.command) {
-      case "init":
-        result = init(options);
+      case "init": {
+        if (!options.interactive) {
+          result = await init(options);
+          break;
+        }
+        // questions go to stderr so stdout stays the report; an empty answer or the end of input
+        // keeps the default. The iterator queues lines, so answers piped before a question is
+        // asked are not lost the way readline.question loses them.
+        const lines = createInterface({ input: process.stdin }),
+          answers = lines[Symbol.asyncIterator]();
+        try {
+          result = await init(options, async (question, fallback) => {
+            process.stderr.write(`${question} [${fallback}]: `);
+            const next = await answers.next();
+            return (next.done ? "" : next.value).trim() || fallback;
+          });
+        } finally {
+          lines.close();
+        }
         break;
+      }
+      case "instructions":
+        // markdown for an agent or a generated documentation region, not a report
+        output(instructions(context(options)));
+        return 0;
+      case "vendor": {
+        // run from a clone, the clone is the source; a vendored copy names its upstream
+        const source =
+          options.from ??
+          ((await gitTop(packageRoot)) === realpathSync(packageRoot) ? packageRoot : undefined);
+        if (!source) {
+          throw new Error("vendor needs --from, the upstream repository or a local clone of it");
+        }
+        result = report([], {
+          command: "vendor",
+          ...(await vendor(options.root, source, options.revision)),
+          next: 'Review and commit the result, for example: git commit -m "build: pull plumb"',
+        });
+        break;
+      }
+      case "packs": {
+        const packs = listPacks(options.index);
+        result = {
+          schemaVersion: 1,
+          command: "packs",
+          ...(options.export ? { written: exportPacks(packs, resolve(options.export)) } : {}),
+          packs: packs.map(({ content, ...pack }) => {
+            const policy: unknown = JSON.parse(content);
+            return { ...pack, policy };
+          }),
+        };
+        break;
+      }
       case "check":
         result = await checkRepository(options);
         break;
@@ -124,7 +195,7 @@ export async function main(
       }
       case "explain": {
         const id = options.rest[0] ?? "";
-        let rules: unknown[] = coreRules();
+        let rules: unknown[] = coreRules().map(describeRule);
         if (!rules.some((rule) => at(rule, "id") === id)) {
           const inspected = (await inspect(options)).rules;
           rules = isArray(inspected) ? inspected : [];
@@ -146,8 +217,53 @@ export async function main(
       case "commits":
         result = await commitCheck(options);
         break;
+      case "baseline":
+        result = await baseline(options);
+        break;
+      case "conformance":
+        result = await conformance(options.adapters);
+        break;
+      case "progress":
+        result = await progress(options);
+        break;
+      case "upgrade":
+        result = await upgrade(options);
+        break;
+      case "mcp":
+      case "lsp": {
+        // every tool call and editor run uses the root and policy the server was started with
+        const fixed = ["--root", options.root];
+        for (const flag of ["config", "policy", "adapters"] as const) {
+          if (options[flag]) {
+            fixed.push(`--${flag}`, options[flag]);
+          }
+        }
+        const run = async (argv: readonly string[]): Promise<{ code: number; text: string }> => {
+          let text = "";
+          const code = await main([...argv, ...fixed], (chunk) => (text += chunk));
+          return { code, text };
+        };
+        const identity = checkerIdentity().sha256;
+        return options.command === "mcp"
+          ? await serve(createInterface({ input: process.stdin }), output, run, identity)
+          : await serveEditor(process.stdin, output, run, options.root, identity);
+      }
+      case "version": {
+        const install = await verifyInstall(packageRoot);
+        result = report(install.diagnostics, {
+          command: "version",
+          checker: checkerIdentity(),
+          node: process.versions.node,
+          ...(install.revision ? { revision: install.revision } : {}),
+        });
+        break;
+      }
       default:
         throw new Error(`Unknown command ${options.command}; run plumb --help`);
+    }
+    if (options.observe && result.status === "violation") {
+      // observing reports the same violations without failing; the status stays a violation
+      result = { ...result, exitCode: 0, observed: true };
     }
     if (options.output) {
       result.saved = saveOutput(
@@ -175,9 +291,21 @@ export async function main(
   } else if (
     options?.format === "json" ||
     (args.includes("json") && args.includes("--format")) ||
-    ["inspect", "explain", "plan", "doctor", "policy-diff", "pin-policy", "pin-input"].includes(
-      options?.command ?? "",
-    )
+    [
+      "inspect",
+      "explain",
+      "plan",
+      "doctor",
+      "policy-diff",
+      "pin-policy",
+      "pin-input",
+      "baseline",
+      "progress",
+      "upgrade",
+      "packs",
+      "version",
+      "vendor",
+    ].includes(options?.command ?? "")
   ) {
     output(`${JSON.stringify(result, null, 2)}\n`);
   } else {
@@ -206,7 +334,7 @@ export async function main(
       output(`Saved ${shown.saved}\n`);
     }
     output(
-      `Plumb: ${shown.status ?? "complete"}${shown.suppressed.length ? ` (${shown.suppressed.length} declared exceptions)` : ""}\n`,
+      `Plumb: ${shown.status ?? "complete"}${result.observed ? " (observed, not enforced)" : ""}${shown.suppressed.length ? ` (${shown.suppressed.length} declared exceptions)` : ""}\n`,
     );
     if (shown.next) {
       output(`${shown.next}\n`);
@@ -216,6 +344,11 @@ export async function main(
   return typeof code === "number" ? code : 0;
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+// a standalone build calls main from its own entry, where every bundled module shares one URL
+if (
+  !globalThis.PLUMB_BUILD_ID &&
+  process.argv[1] &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+) {
   process.exitCode = await main(process.argv.slice(2));
 }

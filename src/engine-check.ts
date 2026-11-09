@@ -6,6 +6,7 @@ import * as comments from "./comments.ts";
 import type { Context } from "./context.ts";
 import * as contracts from "./contracts.ts";
 import * as conventions from "./conventions.ts";
+import * as customRules from "./custom-rules.ts";
 import type { Diagnostic, Report } from "./diagnostics.ts";
 import { attachOrigins, enrichDiagnostics } from "./diagnostics.ts";
 import * as docs from "./docs.ts";
@@ -29,6 +30,7 @@ import { errorCode, errorMessage } from "./errors.ts";
 import { canonical, digest, snapshot } from "./files.ts";
 import * as formatTools from "./format-tools.ts";
 import * as formatting from "./formatting.ts";
+import * as hooks from "./hooks.ts";
 import { applyExceptions } from "./policy.ts";
 import * as policyTests from "./policy-tests.ts";
 import { versionOf } from "./process.ts";
@@ -128,12 +130,23 @@ export async function checkContext(options: EngineOptions): Promise<Report> {
   };
   await execute("files", async () => [
     ...contracts.checkFiles(ctx),
+    ...hooks.checkHookManager(ctx),
     ...(docs.docsApplicable(ctx.config)
       ? await docs.checkDocs(ctx, { execute: options.execute })
       : []),
   ]);
   if (ctx.config.conventions) {
     await execute("conventions", () => conventions.checkConventions(ctx, plan.conventions));
+  }
+  const gitRoot = options.originalRoot ?? ctx.root;
+  if (ctx.config.rules) {
+    metadata.push(...customRules.customRules(ctx.config));
+    await execute("rules", () =>
+      customRules.checkCustomRules(
+        ctx,
+        options.base ? { revision: options.base, gitRoot } : undefined,
+      ),
+    );
   }
   await execute("generated", () => assets.checkAssets(ctx), ctx.ownedFiles.length > 0);
   await execute("comments", () => comments.checkComments(ctx), governedComments(ctx).length > 0);
@@ -249,8 +262,7 @@ export async function checkContext(options: EngineOptions): Promise<Report> {
     }
   }
   diagnostics.push(...validateInputs(ctx, before, options));
-  const gitRoot = options.originalRoot ?? ctx.root,
-    ratchet = options.base ? await checkPolicyBase(ctx, options.base, gitRoot) : undefined;
+  const ratchet = options.base ? await checkPolicyBase(ctx, options.base, gitRoot) : undefined;
   diagnostics.push(
     ...(ratchet?.diagnostics ?? []),
     ...(await nestedPolicyDiagnostics(ctx, gitRoot)),

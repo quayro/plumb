@@ -33,7 +33,8 @@ RULES = [
     ("except", "Exception handlers must not silently discard errors.", "Handle the specific exception or re-raise it.", "policy", False),
     ("skip", "Test files must not skip, xfail or disable tests.", "Fix the test or remove it from the suite.", "policy", False),
 ]
-DYNAMIC = {"importlib.import_module", "__import__", "builtins.__import__"}
+DYNAMIC = {"importlib.import_module", "__import__", "builtins.__import__", "__builtins__.__import__"}
+ESCAPES = {"importlib", "builtins", "__builtins__"}
 SKIPS = {"pytest.mark.skip", "pytest.mark.skipif", "pytest.mark.xfail", "pytest.skip", "pytest.xfail", "unittest.skip", "unittest.skipIf", "unittest.skipUnless"}
 TEST_FILE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test)\.py$")
 TRY = (ast.Try, getattr(ast, "TryStar", ast.Try))
@@ -188,31 +189,113 @@ def validate(request):
 
 def column_of(lines, node):
     return len(lines[node.lineno - 1].encode("utf8")[:node.col_offset].decode("utf8")) + 1
-def aliases(tree):
-    names = {}
-    for node in ast.walk(tree):
+class Scopes:
+    """Lexical name resolution: which import, if any, a name denotes at the place it is used."""
+
+    def __init__(self, tree):
+        self.module, self.bindings, self.parent, self.home, self.declared, self.stars = tree, {}, {}, {}, {}, []
+        self.aliases, self.followed = [], set()
+        stack = [(tree, tree)]
+        while stack:
+            node, scope = stack.pop()
+            stack.extend(reversed(self.note(node, scope)))
+        # a plain assignment passes its value's meaning on; chains longer than this stay unfollowed
+        for _ in range(8):
+            for scope, name, value in self.aliases:
+                self.bindings[self.declared.get(scope, {}).get(name, scope)][name] |= self.targets(value)
+
+    def bind(self, scope, name, target=None):
+        scope = self.declared.get(scope, {}).get(name, scope)
+        self.bindings.setdefault(scope, {}).setdefault(name, set()).add(target)
+
+    def note(self, node, scope):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                names[alias.asname or alias.name.split(".")[0]] = alias.name if alias.asname else alias.name.split(".")[0]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                root = alias.name.split(".")[0]
+                self.bind(scope, alias.asname or root, alias.name if alias.asname else root)
+            return []
+        if isinstance(node, ast.ImportFrom):
+            absolute = node.level == 0 and node.module
             for alias in node.names:
                 if alias.name != "*":
-                    names[alias.asname or alias.name] = f"{node.module}.{alias.name}"
-    return names
-def dotted(node, names):
-    parts = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if not isinstance(node, ast.Name):
-        return None
-    return ".".join([names.get(node.id, node.id), *reversed(parts)])
-def dynamic_findings(tree, source, path, restrictions):
-    names, lines, findings = aliases(tree), source.splitlines(), []
+                    self.bind(scope, alias.asname or alias.name, f"{node.module}.{alias.name}" if absolute else None)
+                elif absolute:
+                    self.stars.append(node.module)
+            return []
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            owner = self.module
+            if isinstance(node, ast.Nonlocal):
+                owner = self.parent.get(scope, self.module)
+                while isinstance(owner, ast.ClassDef):
+                    owner = self.parent.get(owner, self.module)
+            for name in node.names:
+                self.declared.setdefault(scope, {})[name] = owner
+            return []
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            if not isinstance(node, ast.Lambda):
+                self.bind(scope, node.name)
+            self.parent[node] = scope
+            body = {id(item) for item in (node.body if isinstance(node.body, list) else [node.body])}
+            children = []
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.arguments):
+                    for item in ast.walk(child):
+                        if isinstance(item, ast.arg):
+                            self.bind(node, item.arg)
+                # decorators, bases, defaults and annotations are evaluated in the enclosing scope
+                children.append((child, node if id(child) in body else scope))
+            return children
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and isinstance(node.value, (ast.Name, ast.Attribute)):
+            for target in getattr(node, "targets", None) or [node.target]:
+                if isinstance(target, ast.Name):
+                    self.aliases.append((scope, target.id, node.value))
+                    self.followed.add(id(node.value))
+        if isinstance(node, ast.Name):
+            self.home[node] = scope
+            if not isinstance(node.ctx, ast.Load):
+                self.bind(scope, node.id)
+        for name in (getattr(node, "name", None), getattr(node, "rest", None)):
+            if isinstance(name, str):
+                self.bind(scope, name)
+        return [(child, scope) for child in ast.iter_child_nodes(node)]
+
+    def targets(self, node):
+        """Every dotted import path a name or attribute chain may denote; empty when it is not one."""
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if not isinstance(node, ast.Name) or node not in self.home:
+            return set()
+        scope, found, first = self.home[node], None, True
+        while found is None:
+            # a class body's names are invisible to the functions nested in it
+            if (first or not isinstance(scope, ast.ClassDef)) and node.id in self.bindings.get(scope, {}):
+                found = self.bindings[scope][node.id]
+            elif scope is self.module:
+                found = {node.id, *(f"{module}.{node.id}" for module in self.stars)}
+            scope, first = self.parent.get(scope, self.module), False
+        # a name rebound to an unknown value keeps its own meaning: a local called pytest is assumed to be pytest
+        return {".".join([base or node.id, *reversed(parts)]) for base in found}
+
+
+def dynamic_findings(tree, source, path, restrictions, scopes):
+    lines, findings = source.splitlines(), []
     calls = {id(node.func): node for node in ast.walk(tree) if isinstance(node, ast.Call)}
+    bases = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    for scope, names in scopes.bindings.items():
+        if isinstance(scope, ast.ClassDef) and any(target and target.split(".")[0] in ESCAPES for targets in names.values() for target in targets):
+            findings.append(diagnostic("import", path, "Import machinery bound in a class body cannot be followed; import it at module or function level.", line=scope.lineno, column=column_of(lines, scope)))
     for node in ast.walk(tree):
-        target = dotted(node, names) if isinstance(node, (ast.Name, ast.Attribute)) else None
-        if target not in DYNAMIC:
+        if not isinstance(node, (ast.Name, ast.Attribute)) or not isinstance(node.ctx, ast.Load):
+            continue
+        targets = scopes.targets(node)
+        target = min(targets & DYNAMIC, default=None)
+        if target is None:
+            # the module itself handed elsewhere, or reached through its internals, can import anything
+            escaped = min((item for item in targets if item in ESCAPES and id(node) not in bases | scopes.followed or "." in item and item.rsplit(".", 1)[0] in ESCAPES and item.rsplit(".", 1)[1].startswith("__")), default=None)
+            if escaped:
+                findings.append(diagnostic("import", path, f"Reference to {escaped} cannot be followed; call importlib.import_module with a literal module name.", line=node.lineno, column=column_of(lines, node)))
             continue
         call = calls.get(id(node))
         if call is None:
@@ -227,13 +310,13 @@ def dynamic_findings(tree, source, path, restrictions):
         else:
             findings.append(diagnostic("import", path, f"{target} needs a literal absolute module name; its import boundary cannot be checked.", line=call.lineno, column=column_of(lines, call)))
     return findings
-def skip_findings(tree, source, path):
-    names, lines, findings = aliases(tree), source.splitlines(), []
+def skip_findings(tree, source, path, scopes):
+    lines, findings = source.splitlines(), []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Name, ast.Attribute)):
             continue
-        target = dotted(node, names)
-        if target in SKIPS or isinstance(node, ast.Attribute) and node.attr == "skipTest":
+        target = min(scopes.targets(node) & SKIPS, default=None)
+        if target or isinstance(node, ast.Attribute) and node.attr == "skipTest":
             findings.append(diagnostic("skip", path, f"{target or node.attr} disables or expects failure in a test; fix or remove the test instead.", "violation", node.lineno, column_of(lines, node)))
     return findings
 def except_findings(tree, source, path):
@@ -317,11 +400,12 @@ def check(request):
             if token.type == tokenize.COMMENT and DIRECTIVE.search(token.string[1:]):
                 diagnostics.append(diagnostic("directive", path, "Protected suppression directive: " + token.string, "violation", token.start[0], token.start[1] + 1))
         diagnostics.extend(except_findings(tree, source, path))
+        scopes = Scopes(tree)
         if TEST_FILE.search(path):
-            diagnostics.extend(skip_findings(tree, source, path))
+            diagnostics.extend(skip_findings(tree, source, path, scopes))
         if restrictions:
             diagnostics.extend(import_findings(tree, source, path, project_root, restrictions))
-            diagnostics.extend(dynamic_findings(tree, source, path, restrictions))
+            diagnostics.extend(dynamic_findings(tree, source, path, restrictions, scopes))
     for item in inputs:
         try:
             current = sha256(read_source(root, item["path"]))

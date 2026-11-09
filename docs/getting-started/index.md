@@ -4,7 +4,16 @@ Plumb is vendored into each repository so every checkout runs the exact checker 
 
 ## Vendor the checker
 
-The vendored copy is the exact upstream tree, staged with `git read-tree` so updating it is one ordinary commit. `git subtree` is not used: its squash and merge commits break [title-only, linear history](../guides/commits.md).
+From a clone of Plumb, one command installs the checker into a repository, pinned to a commit:
+
+```sh
+node ~/src/plumb/bin/plumb.ts vendor --root .
+git commit -m "build: vendor plumb"
+```
+
+`vendor` stages the exact upstream tree under `tools/plumb` and records its commit in `tools/plumb.revision`, so installing or updating is one ordinary commit. `--revision` pins a tag, branch or commit; the default is the source's `HEAD`. It refuses to replace a vendored copy that has uncommitted edits.
+
+It runs the same steps you can run by hand. `git subtree` is not used: its squash and merge commits break [title-only, linear history](../guides/commits.md).
 
 ```sh
 git fetch https://github.com/quayro/plumb.git main
@@ -48,6 +57,10 @@ Exclude the vendored copy from the repository's own checks and protect it:
 }
 ```
 
+## Start from the repository
+
+`plumb init` writes the first policy from what the repository already is: it detects the languages present, recognizes a history of Conventional Commits and an existing hook manager, and suggests the [policy packs](../guides/packs.md) that fit. `plumb init --interactive` asks instead of assuming, and `plumb init --type library` starts from a ready-made set. Then follow [adopting a policy](../guides/adoption.md): observe, baseline, ratchet.
+
 ## Declare hooks and commits
 
 ```json
@@ -72,6 +85,22 @@ node tools/plumb/bin/plumb.ts fix && git diff --exit-code
 
 Every push to `main` runs `commits --range` over the pushed commits. See [CI and branch protection](../guides/ci.md) for the workflow and the repository settings it relies on.
 
+## Verify the checker
+
+`plumb version` (or `plumb --version`) prints the checker's identity, a hash of its exact sources. For a vendored checker it also compares `tools/plumb` with the commit recorded in `tools/plumb.revision`: an edited copy is `install.modified`, and a revision that is not available locally is incomplete. `plumb doctor` runs the same comparison. Run it in CI after fetching upstream so the checker that judges a change is the one that was reviewed:
+
+```sh
+git fetch -q https://github.com/quayro/plumb.git "$(cat tools/plumb.revision)"
+node tools/plumb/bin/plumb.ts version
+```
+
+`node scripts/build.ts` in the Plumb repository builds a standalone binary with the same identity embedded, for machines without Node.
+
 ## Update the checker
 
-`plumb:pull` replaces `tools/plumb` with upstream `main` and records the revision; commit the result as `build(scope): pull plumb`. Never edit `tools/plumb` in place: fix shared problems in the Plumb repository, then pull in every consumer.
+```sh
+node tools/plumb/bin/plumb.ts vendor --from https://github.com/quayro/plumb.git --revision main
+git commit -m "build: pull plumb"
+```
+
+Pin a release by naming its tag as `--revision`. The `plumb:pull` script above does the same without the checker. Never edit `tools/plumb` in place: fix shared problems in the Plumb repository, then pull in every consumer; `plumb version` reports an edited copy.

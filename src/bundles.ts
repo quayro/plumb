@@ -50,6 +50,8 @@ const additive = new Set([
   "/policy/protected",
   "/verification",
   "/policyTests",
+  "/rules",
+  "/format/sortKeys",
   "/conventions/files",
   "/conventions/roles",
   "/javascript/rules",

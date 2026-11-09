@@ -95,6 +95,30 @@ await test("overlays cannot widen allowances, change hidden source defaults or o
   assert.equal(at(resolve().value, "preset"), "ozmikhail");
 });
 
+await test("an overlay adds sorted-key files but cannot replace default key-column globs", (t) => {
+  const { write, resolve } = fixture(t);
+  const reference = write("base.json", {
+    schemaVersion: 1,
+    format: { sortKeys: [{ files: ["a.json"] }] },
+  });
+  write("plumb.json", {
+    schemaVersion: 1,
+    bundles: [reference],
+    format: { sortKeys: [{ files: ["b.json"], depth: 2 }] },
+  });
+  assert.deepEqual(at(resolve().value, "format", "sortKeys"), [
+    { files: ["a.json"] },
+    { files: ["b.json"], depth: 2 },
+  ]);
+  // an unset keyColumns means the default env globs, so setting one would drop them
+  write("plumb.json", {
+    schemaVersion: 1,
+    bundles: [reference],
+    format: { keyColumns: ["nothing/*"] },
+  });
+  assert.throws(() => resolve(), /overlay/);
+});
+
 await test("shared allowance rows can be repeated exactly but cannot be replaced", (t) => {
   const { write, resolve } = fixture(t);
   const exclude = [{ files: ["vendor/**"], reason: "upstream" }];

@@ -28,7 +28,7 @@ const metadata = object(
   },
   ["id", "description", "remedy"],
 );
-const registrySchema = object(
+export const registrySchema = object(
   {
     schemaVersion: { const: 1 },
     adapters: array(
@@ -45,6 +45,7 @@ const registrySchema = object(
           rules: array(metadata, 1),
           optionsSchema: { type: "object" },
           tools: { type: "object", additionalProperties: text },
+          sandbox: { type: "boolean" },
         },
         ["id", "version", "files", "capabilities", "command", "integrity", "rules"],
       ),

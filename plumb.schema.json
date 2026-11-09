@@ -493,6 +493,36 @@
       "required": [],
       "additionalProperties": false
     },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9-]*$" },
+          "files": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "format": "glob" },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "forbid": { "type": "string", "minLength": 1, "format": "regex" },
+          "require": { "type": "string", "minLength": 1, "format": "regex" },
+          "mentionedIn": { "type": "string", "minLength": 1, "format": "path" },
+          "changesWith": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "format": "glob" },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "reason": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "remedy": { "type": "string", "minLength": 1 }
+        },
+        "required": ["id", "files", "reason"],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
     "conventions": {
       "type": "object",
       "properties": {
@@ -864,9 +894,37 @@
           "minItems": 1,
           "uniqueItems": true
         },
-        "path": { "type": "string", "minLength": 1, "format": "path" }
+        "path": { "type": "string", "minLength": 1, "format": "path" },
+        "manager": { "enum": ["git", "husky", "lefthook", "pre-commit"] }
       },
       "required": ["command"],
+      "additionalProperties": false
+    },
+    "ci": {
+      "type": "object",
+      "properties": {
+        "github": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "pattern": "^[^\\r\\n]+$" },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "setup": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "pattern": "^[^\\r\\n]+$" },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "branch": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._/-]+$" }
+          },
+          "required": ["command"],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
       "additionalProperties": false
     },
     "tools": {
@@ -898,6 +956,12 @@
           "report": { "enum": ["stdout", "file"] },
           "minTests": { "type": "integer", "minimum": 1 },
           "maxSkipped": { "type": "integer", "minimum": 0 },
+          "coverage": {
+            "type": "object",
+            "properties": { "minLines": { "type": "integer", "minimum": 1, "maximum": 100 } },
+            "required": ["minLines"],
+            "additionalProperties": false
+          },
           "timeout": { "type": "integer", "minimum": 1, "maximum": 3600000 },
           "env": { "type": "object", "additionalProperties": { "type": "string" } },
           "inheritEnv": {

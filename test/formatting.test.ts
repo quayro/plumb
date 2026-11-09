@@ -77,6 +77,20 @@ await test("only listed JSON files have their keys sorted", (t) => {
   assert.deepEqual(checkFormatting(r.ctx()), []);
 });
 
+await test("the deepest matching sort entry applies, whatever the entry order", (t) => {
+  const nested = '{"a":{"d":1,"c":2}}\n';
+  for (const sortKeys of [
+    [{ files: ["data/*.json"] }, { files: ["data/a.json"], depth: 2 }],
+    [{ files: ["data/a.json"], depth: 2 }, { files: ["data/*.json"] }],
+  ]) {
+    const r = repo(t, { format: { sortKeys } }, { "data/a.json": nested });
+    assert.deepEqual(
+      checkFormatting(r.ctx()).map(({ rule }) => rule),
+      ["format.json-keys"],
+    );
+  }
+});
+
 await test("an unparseable selected JSON file is incomplete, never a silent pass", (t) => {
   const r = repo(
     t,

@@ -6,6 +6,7 @@ import {
   type Adapter,
   type AdapterRegistry,
   environment,
+  registrySchema,
   verifyRegistry,
 } from "./adapter-registry.ts";
 import type { Project } from "./config.ts";
@@ -14,6 +15,7 @@ import type { Diagnostic } from "./diagnostics.ts";
 import { asError, errorCode } from "./errors.ts";
 import { digest, globMatches, normalize } from "./files.ts";
 import type { Execute } from "./process.ts";
+import { sandboxed } from "./sandbox.ts";
 import { array, object, validateSchema } from "./schema.ts";
 
 // one request and one validated response per external adapter project, over a JSON protocol
@@ -40,7 +42,7 @@ const locationSchema = object(
   },
   ["path"],
 );
-const responseSchema = object(
+export const responseSchema = object(
   {
     schemaVersion: { const: 1 },
     adapter: name,
@@ -67,6 +69,42 @@ const responseSchema = object(
   },
   ["schemaVersion", "adapter", "version", "status", "diagnostics", "coverage", "inputs"],
 );
+
+const evidence = array(object({ path: text, sha256: {} }, ["path", "sha256"]));
+
+const requestSchema = object(
+  {
+    schemaVersion: { const: 1 },
+    action: { enum: ["check", "doctor"] as const },
+    adapter: name,
+    version: text,
+    root: text,
+    project: { type: "object" },
+    files: evidence,
+    inputs: evidence,
+    capabilities: array(name),
+  },
+  [
+    "schemaVersion",
+    "action",
+    "adapter",
+    "version",
+    "root",
+    "project",
+    "files",
+    "inputs",
+    "capabilities",
+  ],
+);
+
+// the adapter protocol as one published document: what a registry declares, what the core sends
+// and what an adapter answers. A change to any of these is a change to the plugin API.
+export const protocolSchema = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "urn:plumb:adapter-protocol:v1",
+  title: "Plumb adapter protocol, version 1",
+  $defs: { registry: registrySchema, request: requestSchema, response: responseSchema },
+};
 
 // input hashes are validated below as SHA-256 or observed absence; the schema vocabulary has no
 // unions.
@@ -130,7 +168,9 @@ export async function externalRun(
     inputs: [...inputs].map(([path, sha256]) => ({ path, sha256 })),
     capabilities: entry.capabilities,
   };
-  const result = await execute(entry.command, {
+  // what is sent is exactly what the published protocol describes
+  validateSchema(request, requestSchema, "adapter request");
+  const result = await execute(entry.sandbox ? sandboxed(entry.command) : entry.command, {
     cwd: ctx.safePath(project.root),
     timeout: ctx.config.tools?.timeout ?? 120000,
     inheritEnv: false,

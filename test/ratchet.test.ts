@@ -243,6 +243,22 @@ await test("removed keys, unlisted changes and limits default to weaken", () => 
   ]);
 });
 
+await test("setting keyColumns compares against the default env globs it replaces", () => {
+  const strict = (format?: unknown) => ({ preset: "ozmikhail", ...(format ? { format } : {}) });
+  // the defaults stop being checked, which a lone added entry used to hide as a tightening
+  assert.deepEqual(classes(strict(), strict({ keyColumns: ["nothing/*"] })), [
+    "tighten /format/keyColumns/0",
+    "weaken /format/keyColumns/0",
+    "weaken /format/keyColumns/1",
+  ]);
+  const defaults = ["**/.env.schema", "**/.env.example"];
+  assert.deepEqual(classes(strict(), strict({ keyColumns: defaults })), []);
+  assert.deepEqual(classes(strict(), strict({ keyColumns: [...defaults, "config/*.keys"] })), [
+    "tighten /format/keyColumns/2",
+  ]);
+  assert.deepEqual(classes(strict({ keyColumns: defaults }), strict()), []);
+});
+
 await test("tools, generated content and reordering are neutral or unchanged", () => {
   assert.deepEqual(
     classes(

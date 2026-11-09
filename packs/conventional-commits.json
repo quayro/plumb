@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "preset": "portable",
+  "commits": {
+    "maxLength": 100
+  }
+}

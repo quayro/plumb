@@ -6,6 +6,15 @@
     "erasableSyntaxOnly": true,
     "types": ["node"]
   },
-  "include": ["bin", "src", "scripts", "test", "packages/javascript", "packages/python/test"],
+  "include": [
+    "bin",
+    "src",
+    "scripts",
+    "test",
+    "packages/javascript",
+    "packages/python/test",
+    "packages/sdk",
+    "packages/go"
+  ],
   "exclude": ["**/node_modules"]
 }

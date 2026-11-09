@@ -40,6 +40,7 @@ export interface SuiteEvidence {
   passed?: number;
   failed?: number;
   skipped?: number;
+  lineCoverage?: number;
   subject?: unknown;
   reportSha256?: string;
   commandSha256?: string;
@@ -51,6 +52,7 @@ export const RULES: Rule[] = (
     ["verification.failed", "Required behavioral verification must pass."],
     ["verification.incomplete", "Required suites need fresh, complete execution evidence."],
     ["verification.skipped", "Skipped tests must stay within the reviewed suite budget."],
+    ["verification.coverage", "Line coverage must stay at or above the reviewed minimum."],
   ] as const
 ).map(([id, description]): Rule => ({
   id,
@@ -119,6 +121,23 @@ export function parseVerification(source: string, format: string, id: string): T
   return tests;
 }
 
+// the percentage of instrumented lines an lcov report records as executed
+function lineCoverage(lcov: string): number {
+  let found = 0,
+    hit = 0;
+  for (const [, key, count] of lcov.matchAll(/^(LF|LH):(\d+)\s*$/gm)) {
+    if (key === "LF") {
+      found += Number(count);
+    } else {
+      hit += Number(count);
+    }
+  }
+  if (!found || hit > found) {
+    throw new Error("The coverage report records no instrumented lines or more hits than lines");
+  }
+  return Math.floor((hit / found) * 10000) / 100;
+}
+
 function readReport(path: string): string {
   const before = lstatSync(path);
   if (!before.isFile() || before.nlink !== 1) {
@@ -175,7 +194,8 @@ export async function verifySuites(
       if (existsSync(reportPath)) {
         throw new Error("Verification report already exists before execution");
       }
-      const directory = artifacts;
+      const directory = artifacts,
+        coveragePath = join(artifacts, "coverage.lcov");
       const env: Record<string, string> = {
         ...Object.fromEntries(
           ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", ...(suite.inheritEnv ?? [])].flatMap(
@@ -188,10 +208,14 @@ export async function verifySuites(
         ...suite.env,
         PLUMB_REPORT: reportPath,
         PLUMB_ARTIFACTS: artifacts,
+        PLUMB_COVERAGE: coveragePath,
         PYTHONDONTWRITEBYTECODE: "1",
       };
       const command = suite.command.map((arg) =>
-        arg.replaceAll("{report}", reportPath).replaceAll("{artifacts}", directory),
+        arg
+          .replaceAll("{report}", reportPath)
+          .replaceAll("{coverage}", coveragePath)
+          .replaceAll("{artifacts}", directory),
       );
       const before = inputDigest(workspace.root);
       const result = await execute(command, {
@@ -234,7 +258,11 @@ export async function verifySuites(
       if (result.code === 1 && !failed) {
         throw new Error("Failing command contradicts a report without failures");
       }
-      const status = failed || skipped > (suite.maxSkipped ?? 0) ? "violation" : "pass";
+      // a required measurement that was not written fresh is incomplete, like a missing test report
+      const covered = suite.coverage ? lineCoverage(readReport(coveragePath)) : undefined,
+        uncovered = covered !== undefined && covered < (suite.coverage?.minLines ?? 0);
+      const status =
+        failed || skipped > (suite.maxSkipped ?? 0) || uncovered ? "violation" : "pass";
       const evidence: SuiteEvidence = {
         id: suite.id,
         status,
@@ -242,6 +270,7 @@ export async function verifySuites(
         passed,
         failed,
         skipped,
+        ...(covered === undefined ? {} : { lineCoverage: covered }),
         subject,
         reportSha256: digest(source),
         commandSha256: digest(canonical(suite.command)),
@@ -249,7 +278,7 @@ export async function verifySuites(
           canonical(
             Object.fromEntries(
               Object.entries(env).filter(
-                ([key]) => !["PLUMB_REPORT", "PLUMB_ARTIFACTS"].includes(key),
+                ([key]) => !["PLUMB_REPORT", "PLUMB_ARTIFACTS", "PLUMB_COVERAGE"].includes(key),
               ),
             ),
           ),
@@ -276,6 +305,15 @@ export async function verifySuites(
             "verification.skipped",
             suite,
             `${skipped} tests skipped; policy permits ${suite.maxSkipped ?? 0}.`,
+          ),
+        );
+      }
+      if (uncovered) {
+        diagnostics.push(
+          issue(
+            "verification.coverage",
+            suite,
+            `Line coverage is ${covered}%; policy requires ${suite.coverage?.minLines}%.`,
           ),
         );
       }

@@ -34,13 +34,16 @@ export const RULES = [
     suppressible: true,
   },
 ];
-const KEY_COLUMNS = ["**/.env.schema", "**/.env.example"];
+export const KEY_COLUMNS = ["**/.env.schema", "**/.env.example"];
 
 const javascript = (ctx: FormatContext): boolean =>
   ctx.config.projects.some((project) => ["typescript", "react"].includes(project.profile));
 
+// the deepest matching entry applies, so an added entry can only sort more, never shadow another
 const sortEntry = (ctx: FormatContext, path: string) =>
-  (ctx.config.format?.sortKeys ?? []).find((entry) => ctx.matches(entry.files, path));
+  (ctx.config.format?.sortKeys ?? [])
+    .filter((entry) => ctx.matches(entry.files, path))
+    .sort((a, b) => (b.depth ?? 1) - (a.depth ?? 1))[0];
 
 const kindOf = (ctx: FormatContext, path: string): Kind | null => {
   const ozmikhail = ctx.config.preset === "ozmikhail";

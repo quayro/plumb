@@ -3,13 +3,23 @@
   "ignoreBinaries": ["taskkill.exe"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts", "test/**/*.test.ts", "packages/python/test/*.test.ts"],
+      "entry": [
+        "scripts/*.ts",
+        "test/**/*.test.ts",
+        "packages/python/test/*.test.ts",
+        "packages/sdk/adapter.ts",
+        "packages/sdk/test/*.test.ts",
+        "packages/go/adapter.ts",
+        "packages/go/test/*.test.ts"
+      ],
       "project": [
         "bin/**/*.ts",
         "src/**/*.ts",
         "scripts/**/*.ts",
         "test/**/*.ts",
-        "packages/python/test/**/*.ts"
+        "packages/python/test/**/*.ts",
+        "packages/sdk/**/*.ts",
+        "packages/go/**/*.ts"
       ]
     },
     "packages/javascript": {

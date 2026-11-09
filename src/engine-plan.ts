@@ -6,9 +6,11 @@ import * as adapters from "./adapters.ts";
 import * as assets from "./assets.ts";
 import * as comments from "./comments.ts";
 import * as commits from "./commits.ts";
+import * as conformance from "./conformance.ts";
 import type { Context } from "./context.ts";
 import * as contracts from "./contracts.ts";
 import * as conventions from "./conventions.ts";
+import * as customRules from "./custom-rules.ts";
 import type { Diagnostic, Report, ReportCheck, Rule, Status } from "./diagnostics.ts";
 import { enrichDiagnostics } from "./diagnostics.ts";
 import * as docs from "./docs.ts";
@@ -18,6 +20,7 @@ import { digest, inventory, isWithin, normalize, snapshot } from "./files.ts";
 import * as formatTools from "./format-tools.ts";
 import * as formatting from "./formatting.ts";
 import * as hooks from "./hooks.ts";
+import * as install from "./install.ts";
 import * as native from "./native.ts";
 import { RULES as POLICY_RULES } from "./policy.ts";
 import * as policyTests from "./policy-tests.ts";
@@ -69,8 +72,11 @@ export const coreRules = (): Rule[] => [
     tasks,
     policyTests,
     conventions,
+    conformance,
+    customRules,
     commits,
     hooks,
+    install,
   ].flatMap((module): Rule[] => module.RULES),
 ];
 
@@ -223,6 +229,16 @@ export function executionPlan(ctx: Context, options: EngineOptions = {}): Execut
       capability: "conventions",
       files: roles.files.filter((file) => !file.excluded).map((file) => file.path),
       evidence: "role-inventory",
+    });
+  }
+  if (ctx.config.rules) {
+    core.push({
+      id: "rules",
+      adapter: "core",
+      root: ".",
+      capability: "rules",
+      files: customRules.customRuleFiles(ctx),
+      evidence: "content",
     });
   }
   const suites = (ctx.config.verification ?? []).map((suite) => ({

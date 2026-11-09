@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "preset": "portable",
+  "files": {
+    "forbidden": ["**/*.orig", "**/*.rej", "**/*.swp", "**/.DS_Store", "**/Thumbs.db"]
+  },
+  "rules": [
+    {
+      "id": "no-conflict-markers",
+      "files": ["**"],
+      "forbid": "^(?:<{7}|>{7}) \\S",
+      "reason": "A merge conflict was committed unresolved.",
+      "remedy": "Resolve the conflict and remove its markers."
+    }
+  ]
+}

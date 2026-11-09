@@ -4,7 +4,9 @@ export const USAGE = `Plumb — executable repository contracts
 
 Usage: plumb <command> [options]
 
-  init                  create a small plumb.json; never overwrite existing files
+  init                  create plumb.json from the detected languages; never overwrite files
+  packs                 list the policy packs of a registry with their pinned hashes
+  vendor                install or update the checker in tools/plumb, pinned to a revision
   check                 run the complete, read-only policy
   plan                  show required checks, ownership and task obligations
   doctor                check prerequisites and suggest adoption steps
@@ -21,6 +23,14 @@ Usage: plumb <command> [options]
   commit-msg FILE       check one commit message file, as the generated commit-msg hook does
   commits --range A..B  check every commit in a range; --message TEXT checks one subject line
   scaffold ROLE NAME    validate and create policy-defined source and companion files
+  baseline              print exceptions that budget today's violations, for review
+  progress              summarize violations and exception budgets; --base adds their change
+  upgrade               preview adopting --policy FILE: policy changes and new violations
+  conformance           probe every adapter in --adapters FILE against the protocol
+  instructions          print the effective policy as instructions for a coding agent
+  mcp                   serve the read-only commands to an agent over stdio
+  lsp                   serve check diagnostics to an editor over the Language Server Protocol
+  version               print the checker identity and verify a vendored install (--version)
 
   --root PATH           project root (otherwise discover plumb.json upwards)
   --config FILE         repository-relative JSON policy (default plumb.json)
@@ -34,10 +44,18 @@ Usage: plumb <command> [options]
   --output FILE         save JSON, SARIF or a repair plan outside the project
   --cache DIRECTORY     reuse unchanged deterministic core results outside CI
   --format FORMAT       text, json, or sarif (check only)
-  --profile PROFILE     init a typescript, react, ruby, cpp or generic project
+  --profile PROFILE     init a typescript, react, ruby, cpp or generic project (default: detect)
   --preset PRESET       init with ozmikhail (default) or portable
+  --pack NAMES          init with these comma-separated packs, copied and pinned as bundles
+  --type TYPE           init with the packs for an application, library or documentation
+  --interactive         init by answering questions; defaults come from the repository
+  --index FILE          packs, init: use this registry index instead of the shipped packs
+  --export DIRECTORY    packs: write the registry as a directory others can host
+  --from SOURCE         vendor: the upstream repository or a local clone (default: this clone)
+  --revision REV        vendor: the tag, branch or commit to pin (default: HEAD)
   --project PATH        snapshot only this configured project
   --base REF            check: report policy changes that weaken the git revision REF
+  --observe             check: report violations without failing; incomplete still fails
 
 Exit codes: 0 complete success; 1 policy violation; 2 incomplete or invalid invocation.
 `;
@@ -61,13 +79,26 @@ const VALUE_FLAGS = [
   "range",
   "message",
   "base",
+  "pack",
+  "type",
+  "index",
+  "export",
+  "from",
+  "revision",
 ] as const;
 
 type ValueFlag = (typeof VALUE_FLAGS)[number];
 
 const isValueFlag = (name: string): name is ValueFlag => VALUE_FLAGS.some((flag) => flag === name);
 
-type Flags = Partial<Record<ValueFlag, string>> & { "dry-run"?: boolean };
+const BOOLEAN_FLAGS = ["dry-run", "observe", "interactive"] as const;
+
+type BooleanFlag = (typeof BOOLEAN_FLAGS)[number];
+
+const isBooleanFlag = (name: string): name is BooleanFlag =>
+  BOOLEAN_FLAGS.some((flag) => flag === name);
+
+type Flags = Partial<Record<ValueFlag, string>> & Partial<Record<BooleanFlag, boolean>>;
 
 export type CliOptions = Omit<Flags, "dry-run"> &
   EngineOptions & {
@@ -93,7 +124,7 @@ export function argumentsOf(args: readonly string[]): Omit<CliOptions, "root"> &
       }
       options[name] = value;
       i++;
-    } else if (name === "dry-run") {
+    } else if (isBooleanFlag(name)) {
       if (Object.hasOwn(options, name)) {
         throw new Error(`${arg} was supplied twice`);
       }
@@ -111,8 +142,20 @@ export function argumentsOf(args: readonly string[]): Omit<CliOptions, "root"> &
   if (options.format === "sarif" && command !== "check") {
     throw new Error("SARIF output is only supported by check");
   }
-  if ((options.profile || options.preset) && command !== "init") {
-    throw new Error("--profile and --preset are only supported by init");
+  if (
+    (options.profile || options.preset || options.pack || options.type || options.interactive) &&
+    command !== "init"
+  ) {
+    throw new Error("--profile, --preset, --pack, --type and --interactive belong to init");
+  }
+  if (options.index && !["packs", "init"].includes(command)) {
+    throw new Error("--index is supported by packs and init");
+  }
+  if (options.export && command !== "packs") {
+    throw new Error("--export is only supported by packs");
+  }
+  if ((options.from || options.revision) && command !== "vendor") {
+    throw new Error("--from and --revision are only supported by vendor");
   }
   if (options.project && command !== "snapshot") {
     throw new Error("--project is only supported by snapshot");
@@ -120,8 +163,14 @@ export function argumentsOf(args: readonly string[]): Omit<CliOptions, "root"> &
   if (options.cache && command !== "check") {
     throw new Error("Result caching is only supported by check");
   }
-  if (options.base && command !== "check") {
-    throw new Error("--base is only supported by check");
+  if (options.base && !["check", "progress"].includes(command)) {
+    throw new Error("--base is supported by check and progress");
+  }
+  if (options.observe && command !== "check") {
+    throw new Error("--observe is only supported by check");
+  }
+  if (command === "upgrade" && !options.policy) {
+    throw new Error("upgrade requires --policy FILE, the policy to adopt");
   }
   if (options.base && options.cache) {
     throw new Error("--base cannot be combined with --cache");
@@ -163,6 +212,8 @@ export function argumentsOf(args: readonly string[]): Omit<CliOptions, "root"> &
       "policy-diff",
       "pin-policy",
       "pin-input",
+      "progress",
+      "upgrade",
     ].includes(command)
   ) {
     throw new Error("This command does not produce a saved report");

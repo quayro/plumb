@@ -8,16 +8,24 @@ import { loadConfig } from "./config.ts";
 import type { Diagnostic, Report } from "./diagnostics.ts";
 import { fixDocs } from "./docs.ts";
 import type { EngineOptions } from "./engine.ts";
-import { checkerIdentity, checkRepository, context, javascriptPack, report } from "./engine.ts";
-import { safePath } from "./files.ts";
+import {
+  checkerIdentity,
+  checkRepository,
+  context,
+  inspect,
+  javascriptPack,
+  report,
+} from "./engine.ts";
+import { compare } from "./engine-plan.ts";
+import { canonical } from "./files.ts";
 import { checkFormatTools } from "./format-tools.ts";
 import { fixFormatting } from "./formatting.ts";
 import { loadInputs } from "./inputs.ts";
 import { nativeSteps } from "./native.ts";
 import { executeSteps } from "./process.ts";
-import { gitTop } from "./ratchet.ts";
+import { comparePolicies, gitTop } from "./ratchet.ts";
 import { applyRepairs, previewRepairs } from "./repair.ts";
-import { at } from "./schema.ts";
+import { at, isArray } from "./schema.ts";
 
 export async function discover(start: string, file: string): Promise<string> {
   const top = await gitTop(resolve(start));
@@ -128,47 +136,132 @@ export async function commitCheck(options: CliOptions): Promise<Report> {
   });
 }
 
-export function init(options: CliOptions): Report {
-  const root = options.root;
-  if (!existsSync(root)) {
-    mkdirSync(root, { recursive: true });
+// one budgeted exception per rule for the violations a check reports today. Nothing is written:
+// the policy changes only by review.
+// shortcut: a violation over an existing exception's budget gets a second, overlapping entry;
+// merge it into the existing one by hand, or teach this to raise that budget when it comes up.
+export async function baseline(options: CliOptions, run?: Report): Promise<Report> {
+  const checked = run ?? (await checkRepository(options)),
+    known = (await inspect(options)).rules,
+    taken = new Set(context(options).config.exceptions.map((entry) => entry.id)),
+    groups = new Map<string, Diagnostic[]>(),
+    remaining: Diagnostic[] = [];
+  const suppressible = new Set(
+    (isArray(known) ? known : [])
+      .filter((rule) => at(rule, "suppressible") !== false)
+      .map((rule) => at(rule, "id")),
+  );
+  for (const item of checked.diagnostics) {
+    if (
+      item.status === "incomplete" ||
+      item.suppressible === false ||
+      !suppressible.has(item.rule) ||
+      // an exception's files are globs, so a path with glob syntax cannot be named exactly
+      /[*?{]/.test(item.path ?? "")
+    ) {
+      remaining.push(item);
+    } else {
+      groups.set(item.rule, [...(groups.get(item.rule) ?? []), item]);
+    }
   }
-  const path = safePath(root, options.configFile ?? "plumb.json", { allowMissing: true });
-  if (existsSync(path)) {
-    throw new Error(`Refusing to overwrite ${path}`);
-  }
-  const profile = options.profile ?? "generic",
-    preset = options.preset ?? "ozmikhail";
-  if (!["generic", "typescript", "react", "ruby", "cpp"].includes(profile)) {
-    throw new Error(`Unknown profile ${profile}`);
-  }
-  if (!["ozmikhail", "portable"].includes(preset)) {
-    throw new Error(`Unknown preset ${preset}`);
-  }
-  const config = {
-    schemaVersion: 1,
-    preset,
-    projects:
-      profile === "generic"
-        ? []
-        : [{ root: ".", profile, ...(profile === "cpp" ? { compileCommands: "build" } : {}) }],
-  };
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { flag: "wx" });
-  const written = [options.configFile ?? "plumb.json"];
-  if (preset === "ozmikhail" && !existsSync(join(root, "AGENTS.md"))) {
-    writeFileSync(
-      join(root, "AGENTS.md"),
-      "# Agent instructions\n\nRun `plumb inspect` to read the effective policy and `plumb check --format json` for diagnostics.\nResolve violations in source. Changes to policy, exceptions or API snapshots require review.\nUse `plumb fix` for source formatting and `plumb sync` for owned assets.\n",
-      { flag: "wx" },
-    );
-    written.push("AGENTS.md");
-  }
-  return report([], {
-    command: "init",
-    written,
-    next: "Run plumb sync, then plumb check. Language profiles need their documented toolchains.",
+  const exceptions = [...groups]
+    .sort(([a], [b]) => compare(a, b))
+    .map(([rule, items]) => {
+      let id = `baseline-${rule.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      while (taken.has(id)) {
+        id += "-x";
+      }
+      taken.add(id);
+      return {
+        id,
+        rules: [rule],
+        files: [...new Set(items.map((item) => item.path ?? "."))],
+        reason: "baseline: violations that predate this policy",
+        max: items.length,
+      };
+    });
+  return report(remaining, {
+    command: "baseline",
+    exceptions,
+    next: "Review these entries, then add them to exceptions in the policy; budgets only shrink.",
   });
+}
+
+const tally = (items: readonly Diagnostic[]): Map<string, number> => {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    counts.set(item.rule, (counts.get(item.rule) ?? 0) + 1);
+  }
+  return counts;
+};
+
+// where adoption stands: what still fails, what each exception budget hides and, against a base,
+// whether the budgets shrank. The exit code is the check's own, so a summary never hides a failure.
+export async function progress(options: CliOptions): Promise<Report> {
+  const checked = await checkRepository(options),
+    hidden = checked.suppressed ?? [],
+    failing = tally(checked.diagnostics.filter((item) => item.status !== "incomplete")),
+    excepted = tally(hidden);
+  const exceptions = context(options).config.exceptions.map((entry) => ({
+    id: entry.id,
+    used: hidden.filter((item) => item.exception === entry.id).length,
+    max: entry.max,
+    ...(entry.expires ? { expires: entry.expires } : {}),
+  }));
+  const changes = isArray(checked.policyChanges) ? checked.policyChanges : undefined,
+    number = (value: unknown): number => (typeof value === "number" ? value : 0);
+  return report(checked.diagnostics, {
+    command: "progress",
+    totals: {
+      violations: [...failing.values()].reduce((sum, count) => sum + count, 0),
+      incomplete: checked.diagnostics.filter((item) => item.status === "incomplete").length,
+      suppressed: hidden.length,
+      budget: exceptions.reduce((sum, entry) => sum + entry.max, 0),
+    },
+    rules: [...new Set([...failing.keys(), ...excepted.keys()])].sort(compare).map((rule) => ({
+      rule,
+      violations: failing.get(rule) ?? 0,
+      suppressed: excepted.get(rule) ?? 0,
+    })),
+    exceptions,
+    ...(changes
+      ? {
+          // a removed exception gives its whole budget back; an added one takes its budget
+          budgetChange: changes
+            .filter((item) => /^\/exceptions\/[^/]+(?:\/max)?$/.test(String(at(item, "pointer"))))
+            .reduce(
+              (sum: number, item) =>
+                sum +
+                number(at(item, "after", "max") ?? at(item, "after")) -
+                number(at(item, "before", "max") ?? at(item, "before")),
+              0,
+            ),
+        }
+      : {}),
+  });
+}
+
+// what adopting the policy given as --policy would change here: its classified policy changes, the
+// diagnostics it introduces and resolves, and the exceptions that would budget what it reports
+export async function upgrade(options: CliOptions): Promise<Report> {
+  const current = { ...options, policy: undefined },
+    before = await checkRepository(current),
+    after = await checkRepository(options);
+  const key = (item: Diagnostic): string =>
+    item.fingerprint ?? canonical([item.rule, item.path, item.message]);
+  const known = new Set(before.diagnostics.map(key)),
+    kept = new Set(after.diagnostics.map(key));
+  return report(
+    // an incomplete candidate run is never a clean upgrade, even when today's run is incomplete too
+    after.diagnostics.filter((item) => item.status === "incomplete" || !known.has(key(item))),
+    {
+      command: "upgrade",
+      changes: comparePolicies(context(current).config, context(options).config),
+      resolved: before.diagnostics.filter((item) => !kept.has(key(item))),
+      exceptions: (await baseline(options, after)).exceptions,
+      next: "Review the changes; fix the new violations or add the reviewed exceptions with the policy.",
+    },
+  );
 }
 
 export async function mutation(options: CliOptions): Promise<Report> {

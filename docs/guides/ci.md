@@ -60,6 +60,26 @@ jobs:
 
 Pin every action to a full commit SHA with its version in a comment, and keep the token read-only. Node 22.18 or later runs `bin/plumb.ts` the same way, as `node tools/plumb/bin/plumb.ts`. `check` already enforces formatting, and `fix` ends with a full check of its own, so CI does not run `fix`. A push straight to `main` gets the same ratchet against the commit it replaced, so a branch without required checks still reports a weakened policy. The checkout uses the pull request's head commit rather than GitHub's synthetic merge commit, which would otherwise fail `commits.merge`.
 
+## Generated workflow
+
+Instead of maintaining that file by hand, declare it and let `plumb sync` write `.github/workflows/plumb.yml`:
+
+```json
+{
+  "ci": {
+    "github": {
+      "command": ["node", "tools/plumb/bin/plumb.ts"],
+      "setup": ["npm ci"],
+      "branch": "main"
+    }
+  }
+}
+```
+
+The generated job checks out full history, sets up Node 22.18 (or Bun when the command starts with `bun`), runs each `setup` line, then `check --base` against the pull request base or the replaced commit. With `commits` configured it also checks every commit and the pull request title. Actions are pinned to full commit SHAs, the token is read-only, and event text reaches the shell only through the environment.
+
+The file is a generated asset: editing it by hand is `generated.drift`, and removing `ci` from the policy is a weakening the [ratchet](policy-ratchet.md) refuses. Require the `plumb` job in branch protection.
+
 ## Repository settings
 
 Plumb cannot enforce these; set them once per repository:

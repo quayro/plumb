@@ -59,7 +59,7 @@ await test("--base is check-only, cannot be cached, and --config is refused wher
   });
   assert.match(
     (await cli(["sync", "--root", root, "--base", "HEAD"])).text,
-    /--base is only supported by check/,
+    /--base is supported by check and progress/,
   );
   assert.match(
     (await cli(["check", "--root", root, "--base", "HEAD", "--cache", join(root, "..")])).text,

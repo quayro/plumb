@@ -164,3 +164,36 @@ await test("tests may write fresh external artifacts but cannot mutate checked s
   assert.match(result.diagnostics[0].message, /changed checked source/);
   assert.equal(readFileSync(join(ctx.root, "source.txt"), "utf8"), "original");
 });
+
+await test("a coverage minimum is a violation below it and incomplete without a fresh report", async (t) => {
+  const suite = (lcov: string | undefined, minLines: number): Suites => [
+    {
+      id: "unit",
+      format: "plumb-json",
+      coverage: { minLines },
+      command: command(
+        `${lcov === undefined ? "" : `(await import("node:fs")).writeFileSync(process.env.PLUMB_COVERAGE, ${JSON.stringify(lcov)});`}console.log(${JSON.stringify(json([row("passed")]))})`,
+      ),
+    },
+  ];
+  const run = async (lcov: string | undefined, minLines = 80) =>
+    await verifySuites(fixture(t, { "a.txt": "x" }, suite(lcov, minLines)));
+  const lcov = "SF:a.js\nLF:10\nLH:9\nend_of_record\nSF:b.js\nLF:10\nLH:7\nend_of_record\n";
+  const passed = await run(lcov);
+  assert.deepEqual(passed.diagnostics, []);
+  assert.equal(passed.results[0]?.lineCoverage, 80);
+  const low = await run(lcov, 81);
+  assert.deepEqual(
+    low.diagnostics.map((item) => [item.rule, item.status, item.message]),
+    [["verification.coverage", undefined, "Line coverage is 80%; policy requires 81%."]],
+  );
+  assert.equal(low.checks[0]?.status, "violation");
+  // no report, an empty one, a record without lines and more hits than lines are not measurements
+  for (const fake of [undefined, "", "SF:a.js\nend_of_record\n", "LF:1\nLH:5\n", "LF:0\nLH:0\n"]) {
+    const result = await run(fake, 1);
+    assert.deepEqual(
+      result.diagnostics.map((item) => [item.rule, item.status]),
+      [["verification.incomplete", "incomplete"]],
+    );
+  }
+});

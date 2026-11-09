@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import { loadAdapterRegistry } from "./adapter-registry.ts";
 import * as adapters from "./adapters.ts";
 import * as assets from "./assets.ts";
-import type { Diagnostic, Report } from "./diagnostics.ts";
+import { customRules } from "./custom-rules.ts";
+import type { Diagnostic, Report, Rule } from "./diagnostics.ts";
 import { checkContext } from "./engine-check.ts";
 import { context, type EngineOptions, FIXTURE_RUN } from "./engine-context.ts";
 import { checkerIdentity, javascriptPack } from "./engine-pack.ts";
@@ -12,13 +13,17 @@ import {
   coreRules,
   executionPlan,
   failure,
+  packageRoot,
   report,
   validateInputs,
 } from "./engine-plan.ts";
 import { errorMessage } from "./errors.ts";
 import { canonical, digest, inventory, normalize, snapshot } from "./files.ts";
 import * as hooks from "./hooks.ts";
+import { detectProfiles } from "./init.ts";
 import { loadInputs, materializeInputs } from "./inputs.ts";
+import { verifyInstall } from "./install.ts";
+import { fileConventions } from "./instructions.ts";
 import * as policyTests from "./policy-tests.ts";
 import { scaffold } from "./scaffold.ts";
 import * as tasks from "./task.ts";
@@ -27,7 +32,7 @@ import { copyWorkspace } from "./workspace.ts";
 // engine.ts is the public entry; the context, plan and check stages live in their own modules
 export { context, type EngineOptions } from "./engine-context.ts";
 export { checkerIdentity, javascriptPack } from "./engine-pack.ts";
-export { coreRules, report } from "./engine-plan.ts";
+export { coreRules, packageRoot, report } from "./engine-plan.ts";
 
 export async function testPolicy(options: EngineOptions = {}): Promise<Report> {
   let ctx;
@@ -176,9 +181,15 @@ export async function checkRepository(options: EngineOptions = {}): Promise<Repo
   }
 }
 
+// a guarantee cannot be excepted; a convention admits budgeted, reviewed exceptions
+export const describeRule = (rule: Rule): Rule & { kind: "guarantee" | "convention" } => ({
+  ...rule,
+  kind: rule.suppressible === false ? "guarantee" : "convention",
+});
+
 export async function inspect(options: EngineOptions = {}): Promise<Record<string, unknown>> {
   const ctx = context(options),
-    metadata = coreRules();
+    metadata = [...coreRules(), ...customRules(ctx.config)];
   let javascriptIdentity;
   if (adapters.needsJavascript(ctx.config)) {
     const pack = await (options.loadJavascript ?? javascriptPack)();
@@ -201,15 +212,18 @@ export async function inspect(options: EngineOptions = {}): Promise<Record<strin
     policySources: ctx.policySources,
     files: ctx.files,
     excludedFiles: ctx.allFiles.filter((file) => !ctx.files.includes(file)),
-    rules: metadata.sort((a, b) => compare(a.id, b.id)),
+    rules: metadata.sort((a, b) => compare(a.id, b.id)).map(describeRule),
     checker: checkerIdentity(javascriptIdentity),
     plan: { checks: plan.checks, files: plan.files, diagnostics: plan.diagnostics },
     ...(selected
       ? {
-          file: plan.files.find((file) => file.path === selected) ?? {
-            path: selected,
-            present: false,
-            checks: [],
+          file: {
+            ...(plan.files.find((file) => file.path === selected) ?? {
+              path: selected,
+              present: false,
+              checks: [],
+            }),
+            conventions: fileConventions(ctx, selected),
           },
         }
       : {}),
@@ -258,24 +272,14 @@ export async function doctor(options: EngineOptions = {}): Promise<Report> {
     let suggestion: Record<string, unknown> | undefined;
     try {
       const found = inventory(options.root ?? process.cwd());
-      const profiles: [string, RegExp][] = [
-        ["typescript", /\.[cm]?[jt]sx?$/],
-        ["ruby", /\.(?:rb|rake|gemspec)$|(?:^|\/)(?:Gemfile|Rakefile)$/],
-        ["cpp", /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx)$/],
-        ["python", /\.py$/],
-        ["go", /\.go$/],
-        ["rust", /\.rs$/],
-      ];
       suggestion = {
         schemaVersion: 1,
         preset: "ozmikhail",
-        projects: profiles
-          .filter(([, pattern]) => found.files.some((file) => pattern.test(file)))
-          .map(([profile]) => ({
-            root: ".",
-            profile,
-            ...(profile === "cpp" ? { compileCommands: "build" } : {}),
-          })),
+        projects: detectProfiles(found.files).map((profile) => ({
+          root: ".",
+          profile,
+          ...(profile === "cpp" ? { compileCommands: "build" } : {}),
+        })),
       };
     } catch (error) {
       // without a readable inventory no starter policy can be suggested; say why alongside the policy error
@@ -315,7 +319,10 @@ export async function doctor(options: EngineOptions = {}): Promise<Report> {
     execute: options.execute,
   });
   const assetProblems = assets.checkAssets(ctx);
-  const hookProblems = await hooks.checkHooks(ctx.config, ctx.root);
+  const hookProblems = [
+    ...(await hooks.checkHooks(ctx.config, ctx.root)),
+    ...(await verifyInstall(packageRoot)).diagnostics,
+  ];
   const plan = planRepository(options);
   return report(
     [

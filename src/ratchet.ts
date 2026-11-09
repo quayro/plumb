@@ -7,6 +7,7 @@ import type { Context } from "./context.ts";
 import type { Diagnostic } from "./diagnostics.ts";
 import { errorMessage } from "./errors.ts";
 import { canonical, globMatches, normalize } from "./files.ts";
+import { KEY_COLUMNS } from "./formatting.ts";
 import { run, type RunResult } from "./process.ts";
 import { at, isArray, isRecord } from "./schema.ts";
 
@@ -50,6 +51,7 @@ const ADDITIONS_TIGHTEN = new Set([
   "/projects",
   "/verification",
   "/policyTests",
+  "/rules",
   "/format/tools",
   "/format/sortKeys",
   "/format/keyColumns",
@@ -62,6 +64,7 @@ const ADDITIONS_TIGHTEN = new Set([
 ]);
 const NEUTRAL = ["/tools/versions", "/tools/timeout", "/generated", "/$schema"];
 const SECTIONS = new Set([
+  "/ci",
   "/commits",
   "/hooks",
   "/docs",
@@ -269,11 +272,20 @@ function walk(before: unknown, after: unknown, path: string, out: PolicyDelta[])
   out.push(change(path, kind, before, after, scalarClass(path, kind, before, after)));
 }
 
+// an unset keyColumns means the default globs, so setting it is compared against what it replaces
+const withDefaultKeyColumns = (policy: unknown): unknown =>
+  plain(policy) && at(policy, "format", "keyColumns") === undefined
+    ? {
+        ...policy,
+        format: { ...(plain(policy.format) ? policy.format : {}), keyColumns: KEY_COLUMNS },
+      }
+    : policy;
+
 // every changed JSON pointer between two effective policies, classified tighten, neutral or weaken.
 // anything not explicitly listed is weaken.
 export function comparePolicies(before: unknown, after: unknown): PolicyDelta[] {
   const out: PolicyDelta[] = [];
-  walk(before, after, "", out);
+  walk(withDefaultKeyColumns(before), withDefaultKeyColumns(after), "", out);
   return out.sort((a, b) => (a.pointer < b.pointer ? -1 : a.pointer > b.pointer ? 1 : 0));
 }
 
@@ -291,6 +303,23 @@ const git = (cwd: string, args: string[]): Promise<RunResult> =>
 export async function gitTop(dir: string): Promise<string | undefined> {
   const result = await git(dir, ["rev-parse", "--show-toplevel"]);
   return result.code === 0 && !result.error ? realpathSync(result.stdout.trim()) : undefined;
+}
+
+const REVISION = /^[^-\s\0][^\s\0]*$/;
+
+// paths under gitRoot that differ from the merge base with a revision, untracked files included
+export async function changedFiles(gitRoot: string, base: string): Promise<string[]> {
+  if (!REVISION.test(base)) {
+    throw new Error(`--base ${base} is not a git revision.`);
+  }
+  const results = await Promise.all([
+    git(gitRoot, ["diff", "--name-only", "--relative", "-z", "--merge-base", base]),
+    git(gitRoot, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
+  if (results.some((result) => result.code !== 0 || result.error)) {
+    throw new Error(`The files changed since ${base} cannot be listed.`);
+  }
+  return results.flatMap((result) => result.stdout.split("\0").filter(Boolean));
 }
 
 // materializes the base policy and its pinned bundles from git, then classifies the effective change.
@@ -314,7 +343,7 @@ export async function checkPolicyBase(
     ],
     changes: [],
   });
-  if (typeof base !== "string" || !/^[^-\s\0][^\s\0]*$/.test(base)) {
+  if (typeof base !== "string" || !REVISION.test(base)) {
     return incomplete(`--base ${String(base)} is not a git revision.`);
   }
   const verify = await git(gitRoot, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`]);

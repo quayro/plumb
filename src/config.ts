@@ -160,6 +160,22 @@ export const schema = {
         ),
       }),
       contracts,
+      rules: array(
+        object(
+          {
+            id: { ...text, pattern: "^[a-z][a-z0-9-]*$" },
+            files: globs,
+            forbid: regex,
+            require: regex,
+            mentionedIn: path,
+            changesWith: globs,
+            reason,
+            remedy: text,
+          },
+          ["id", "files", "reason"],
+        ),
+        1,
+      ),
       conventions: CONVENTIONS_SCHEMA,
       policyTests: POLICY_TESTS_SCHEMA,
       javascript: { type: "object" },
@@ -188,7 +204,24 @@ export const schema = {
         scopes: array({ ...text, pattern: "^[a-z][a-z0-9-]*$" }, 1),
         maxLength: integer,
       }),
-      hooks: object({ command: array(text, 1), path }, ["command"]),
+      hooks: object(
+        {
+          command: array(text, 1),
+          path,
+          manager: { enum: ["git", "husky", "lefthook", "pre-commit"] },
+        },
+        ["command"],
+      ),
+      ci: object({
+        github: object(
+          {
+            command: array({ ...text, pattern: "^[^\\r\\n]+$" }, 1),
+            setup: array({ ...text, pattern: "^[^\\r\\n]+$" }, 1),
+            branch: { ...text, pattern: "^[A-Za-z0-9._/-]+$" },
+          },
+          ["command"],
+        ),
+      }),
       tools: object({
         timeout: { ...integer, maximum: 3600000 },
         versions: { type: "object", additionalProperties: text },
@@ -203,6 +236,9 @@ export const schema = {
             report: { enum: ["stdout", "file"] },
             minTests: integer,
             maxSkipped: { type: "integer", minimum: 0 },
+            coverage: object({ minLines: { type: "integer", minimum: 1, maximum: 100 } }, [
+              "minLines",
+            ]),
             timeout: { ...integer, maximum: 3600000 },
             env: { type: "object", additionalProperties: { type: "string" } },
             inheritEnv: array({ ...text, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }),
@@ -316,6 +352,21 @@ export function definePlumb(input: unknown): Config {
     ) {
       throw new TypeError(`Exception ${exception.id}: invalid expiry date`);
     }
+  }
+  ids.clear();
+  for (const rule of config.rules ?? []) {
+    if (ids.has(rule.id)) {
+      throw new TypeError(`Duplicate rule ${rule.id}`);
+    }
+    ids.add(rule.id);
+    if (!["forbid", "require", "mentionedIn", "changesWith"].some((key) => key in rule)) {
+      throw new TypeError(
+        `Rule ${rule.id} needs one of forbid, require, mentionedIn or changesWith`,
+      );
+    }
+  }
+  if (config.hooks?.path && ["lefthook", "pre-commit"].includes(config.hooks.manager ?? "git")) {
+    throw new TypeError(`hooks.path: ${config.hooks.manager} keeps its hooks in git's own folder`);
   }
   for (const [index, entry] of (config.format?.tools ?? []).entries()) {
     if (entry.dialect && entry.tool !== "sql-formatter") {

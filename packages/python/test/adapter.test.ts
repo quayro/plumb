@@ -239,3 +239,104 @@ await test("missing source and wrong expected hashes are incomplete with explici
   assert.ok(result.diagnostics.some((item) => item.rule === "python/input"));
   assert.ok(result.coverage.every((row) => row.status === "incomplete"));
 });
+
+const FORBID_SUBPROCESS = {
+  forbiddenImports: [{ module: "subprocess", reason: "Use the reviewed runner" }],
+};
+
+await test("dynamic imports resolve names in their lexical scope, so a decoy binding hides nothing", (t) => {
+  const violations: Record<string, string> = {
+    "plain.py": 'import importlib\nimportlib.import_module("subprocess")\n',
+    // a nested import of the same name belongs to its own scope, not to the module-level call
+    "decoy.py":
+      'from importlib import import_module as load\ndef _decoy():\n    from json import load\n    return load\nload("subprocess")\n',
+    "closure.py":
+      'import importlib as il\ndef run():\n    return il.import_module(name="subprocess.tools")\n',
+    "star.py": 'from importlib import *\nimport_module("subprocess")\n',
+    "global.py":
+      'def setup():\n    global il\n    import importlib as il\nil.import_module("subprocess")\n',
+    "builtin.py": '__import__("subprocess")\n',
+    "builtins.py": '__builtins__.__import__("subprocess")\n',
+    // a class body's own names are invisible to its methods
+    "method.py":
+      'import importlib\nclass Loader:\n    importlib = None\n    def run(self):\n        return importlib.import_module("subprocess")\n',
+    "rebound.py":
+      'import importlib\nif False:\n    importlib = None\nimportlib.import_module("subprocess")\n',
+    "assigned.py":
+      'import importlib\nil = importlib\nload = il.import_module\nload("subprocess")\n',
+    "walrus.py":
+      'import importlib\n(il := importlib).import_module\nil.import_module("subprocess")\n',
+  };
+  const { direct } = fixture(t, violations, FORBID_SUBPROCESS);
+  const found = direct().diagnostics.filter((item) => item.status !== "incomplete");
+  assert.deepEqual(
+    found.map((item) => [item.path, item.rule]),
+    Object.keys(violations)
+      .sort()
+      .map((path) => [path, "python/import"]),
+  );
+});
+
+await test("import machinery that escapes analysis is incomplete, never a pass", (t) => {
+  const escapes: Record<string, string> = {
+    "getattr.py": 'import importlib\ngetattr(importlib, "import_module")("subprocess")\n',
+    "internals.py": 'import importlib\nimportlib.__dict__["import_module"]("subprocess")\n',
+    "argument.py": "import importlib\ndef run(module):\n    return module\nrun(importlib)\n",
+    "tuple.py": 'import importlib\nil, other = importlib, 1\nil.import_module("subprocess")\n',
+    "attribute.py":
+      'import importlib\nclass Box:\n    pass\nBox.il = importlib\nBox.il.import_module("subprocess")\n',
+    "class_body.py":
+      'class Box:\n    import importlib\nBox.importlib.import_module("subprocess")\n',
+    "computed.py": 'import importlib\nname = "sub" + "process"\nimportlib.import_module(name)\n',
+    "reference.py": "import functools\nload = functools.partial(__import__)\n",
+  };
+  for (const [path, source] of Object.entries(escapes)) {
+    const output = fixture(t, { [path]: source }, FORBID_SUBPROCESS).direct();
+    assert.equal(output.status, "incomplete", path);
+    assert.ok(
+      output.diagnostics.every((item) => item.rule === "python/import"),
+      path,
+    );
+  }
+});
+
+await test("names that only look like import machinery are not reported", (t) => {
+  const { direct } = fixture(
+    t,
+    {
+      "local.py": 'def import_module(name):\n    return name\nimport_module("subprocess")\n',
+      "nested.py":
+        'def read(handle):\n    from json import load\n    return load(handle)\nimport importlib\nimportlib.import_module("json")\n',
+      "tools.py":
+        'import importlib\nimport importlib.util\nimportlib.reload\nimportlib.util.find_spec("json")\n',
+      "text.py": "label = \"importlib.import_module('subprocess')\"\n",
+    },
+    FORBID_SUBPROCESS,
+  );
+  const output = direct();
+  assert.deepEqual(output.diagnostics, []);
+  assert.equal(output.status, "pass");
+});
+
+await test("test skips are found through aliases, assignments and decoy scopes", (t) => {
+  const skipped: Record<string, string> = {
+    "test_alias.py": "import pytest as checks\n@checks.mark.skip\ndef test_a():\n    pass\n",
+    "test_assigned.py": "import pytest\nmark = pytest.mark\n@mark.xfail\ndef test_a():\n    pass\n",
+    // the decorator is evaluated outside the function, whatever the body rebinds
+    "test_decoy.py":
+      "import pytest\ndef _decoy():\n    import json as pytest\n    return pytest\n@pytest.mark.skip\ndef test_a():\n    pytest = None\n    return pytest\n",
+    "test_parameter.py": "def test_a(pytest):\n    pytest.skip()\n",
+    "test_unittest.py":
+      "from unittest import skip as later\n@later('soon')\ndef test_a():\n    return 1\n",
+  };
+  const { direct } = fixture(t, {
+    ...skipped,
+    "test_clean.py": "import json as pytest\ndef test_a():\n    assert pytest.dumps(1) == '1'\n",
+  });
+  assert.deepEqual(
+    [...new Set(direct().diagnostics.map((item) => `${item.path} ${item.rule}`))],
+    Object.keys(skipped)
+      .sort()
+      .map((path) => `${path} python/skip`),
+  );
+});

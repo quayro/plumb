@@ -1,0 +1,22 @@
+[
+  {
+    "name": "hygiene",
+    "description": "Editor and merge leftovers stay out of the repository.",
+    "suits": ["application", "library", "documentation"]
+  },
+  {
+    "name": "secrets",
+    "description": "Credential files, private keys and access tokens are refused.",
+    "suits": ["application", "library", "documentation"]
+  },
+  {
+    "name": "conventional-commits",
+    "description": "Title-only Conventional Commits with the default types.",
+    "suits": ["application", "library", "documentation"]
+  },
+  {
+    "name": "open-source",
+    "description": "A published project keeps its licence and its readme.",
+    "suits": ["library"]
+  }
+]

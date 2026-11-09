@@ -14,7 +14,7 @@ This file is the entry point for work on Plumb itself. Plumb checks itself with 
 
 | Command                      | What it does                                     |
 | ---------------------------- | ------------------------------------------------ |
-| `npm test`                   | Core, JavaScript-pack and Python-adapter suites  |
+| `npm test`                   | Core, JavaScript-pack, Python and adapter suites |
 | `npm run test:native`        | Real RuboCop, clang-format and clang-tidy checks |
 | `npm run check`              | Plumb's own policy                               |
 | `npm run fix`                | Write formatting and generated regions           |

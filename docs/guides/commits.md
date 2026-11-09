@@ -37,3 +37,20 @@ These refusals are always on and cannot be excepted:
 - **Automated commits.** Configure bots to write a passing subject, for example Dependabot's `commit-message.prefix: "build"` with `include: scope`. Plumb has no author exemptions.
 
 `git commit --no-verify` cannot be detected locally; CI is the backstop. Squash fixups with `git rebase --autosquash` before pushing.
+
+## Existing hook managers
+
+A repository that already runs husky, lefthook or pre-commit keeps it. Name it in the policy and Plumb generates no hook files of its own:
+
+```json
+{ "hooks": { "command": ["node", "tools/plumb/bin/plumb.ts"], "manager": "lefthook" } }
+```
+
+| Manager      | Where the invocation lives                  | What `plumb doctor` expects in the clone   |
+| ------------ | ------------------------------------------- | ------------------------------------------ |
+| `git`        | generated `.githooks/` (the default)        | `core.hooksPath` is the hooks folder       |
+| `husky`      | `.husky/pre-commit` and `.husky/commit-msg` | `core.hooksPath` is `.husky` or `.husky/_` |
+| `lefthook`   | `lefthook.yml`                              | `lefthook install` has run                 |
+| `pre-commit` | `.pre-commit-config.yaml`                   | `pre-commit install` has run               |
+
+`plumb check` requires the manager's file to hold the policy invocation as a whole line: `COMMAND check`, and `COMMAND commit-msg` once `commits` is configured, optionally after `run:`, `entry:` or `exec`. A commented line, an appended `|| true` or an extra flag such as `--observe` is `hooks.manager`, and a missing file is incomplete. The check reads lines, not the manager's schema, so CI stays the enforcement point.
