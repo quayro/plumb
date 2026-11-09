@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "preset": "ozmikhail",
+  "projects": [
+    {
+      "root": ".",
+      "profile": "typescript",
+      "tsconfigs": ["tsconfig.json"],
+      "knip": true
+    },
+    {
+      "root": "packages/python",
+      "profile": "python"
+    }
+  ],
+  "files": {
+    "required": ["AGENTS.md", "README.md", "bun.lock", "docs/index.md", "plumb.schema.json"],
+    "forbidden": ["**/*.mjs", "**/*.js", "**/*.cjs"],
+    "names": [
+      {
+        "files": [
+          "src/**/*.ts",
+          "bin/**/*.ts",
+          "scripts/**/*.ts",
+          "test/**/*.ts",
+          "packages/**/*.ts"
+        ],
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.test)?\\.ts$",
+        "reason": "runtime and tests are erasable TypeScript modules with consistent names"
+      },
+      {
+        "files": ["docs/**/*.md"],
+        "pattern": "^[a-z0-9][a-z0-9-]*\\.md$",
+        "reason": "documentation pages use kebab-case names"
+      }
+    ]
+  },
+  "docs": {
+    "index": "docs/index.md",
+    "sections": [
+      "getting-started",
+      "guides",
+      "concepts",
+      "reference",
+      "architecture",
+      "decisions",
+      "contributing"
+    ],
+    "kinds": [
+      {
+        "files": ["docs/decisions/*.md"],
+        "exclude": ["docs/decisions/index.md"],
+        "name": "^\\d{4}-[a-z0-9-]+\\.md$",
+        "sections": ["Status", "Context", "Decision", "Consequences"],
+        "status": ["Proposed", "Accepted", "Superseded", "Deprecated"],
+        "sequence": true
+      }
+    ],
+    "generated": [
+      {
+        "file": "docs/reference/cli.md",
+        "region": "cli",
+        "command": ["node", "bin/plumb.ts", "--help"]
+      }
+    ]
+  },
+  "comments": {
+    "tasks": "^TODO\\(#\\d+\\)"
+  },
+  "commits": {
+    "maxLength": 100
+  },
+  "hooks": {
+    "command": ["node", "scripts/plumb.ts"]
+  },
+  "policy": {
+    "owners": ["@ozmikhail"],
+    "protected": [
+      "src/**",
+      "bin/**",
+      "scripts/**",
+      "packages/javascript/**",
+      "packages/python/**",
+      "plumb.schema.json",
+      "AGENTS.md"
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "@quayro/plumb",
+  "description": "Portable, deterministic repository contracts for agentic coding",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "plumb": "./bin/plumb.ts"
+  },
+  "workspaces": [
+    "packages/javascript"
+  ],
+  "scripts": {
+    "build": "node scripts/build.ts",
+    "check": "node scripts/plumb.ts check",
+    "fix": "node scripts/plumb.ts fix",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "postinstall": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
+    "schema": "node scripts/schema.ts",
+    "test": "node scripts/test.ts",
+    "test:javascript": "node scripts/test.ts javascript",
+    "test:native": "node scripts/test.ts native",
+    "test:python": "node scripts/test.ts python",
+    "test:unit": "node scripts/test.ts unit"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "prettier": "3.9.10"
+  },
+  "packageManager": "bun@1.4.4"
+}

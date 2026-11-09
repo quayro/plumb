@@ -1,0 +1,3 @@
+[install]
+# plumb reads dependencies as regular files; it refuses symlinked installs
+linker = "hoisted"

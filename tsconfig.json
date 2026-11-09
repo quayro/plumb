@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./packages/javascript/assets/tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "types": ["node"]
+  },
+  "include": ["bin", "src", "scripts", "test", "packages/javascript", "packages/python/test"],
+  "exclude": ["**/node_modules"]
+}
