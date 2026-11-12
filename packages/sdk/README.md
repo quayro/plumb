@@ -24,7 +24,7 @@ A definition is `id`, `version`, the `files` globs, `capabilities`, `rules` and 
 ## Guarantees
 
 - A source is read from the request's `root` and checked only when its bytes match the requested hash. A mismatch, a missing file, invalid UTF-8, an exception from `check` or an undeclared rule is `ID/input`, incomplete.
-- A request with another protocol version, adapter id, adapter version or action, or with a path that is absolute or leaves the repository, is `ID/protocol`, incomplete.
+- A request with another protocol version, adapter id, adapter version or action, or with a path that is absolute, starts with a drive letter or a backslash, or leaves the repository, is `ID/protocol`, incomplete.
 - A file is listed under `coverage` only when it was completely checked.
 - The exit code is 0 for pass, 1 for violation and 2 for incomplete.
 

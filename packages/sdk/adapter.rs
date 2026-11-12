@@ -433,7 +433,10 @@ impl Reply {
 
 fn relative(path: &str) -> bool {
     let parsed = Path::new(path);
+    // a drive or a leading backslash is absolute on Windows, so it is refused on every platform
     !parsed.has_root()
+        && !path.starts_with('\\')
+        && !matches!(path.as_bytes(), [drive, b':', ..] if drive.is_ascii_alphabetic())
         && !matches!(parsed.components().next(), Some(Component::Prefix(_)))
         && !path.split(['/', '\\']).any(|part| part == "..")
 }

@@ -165,7 +165,13 @@ export function respond(definition: AdapterDefinition, request: unknown): Respon
     inputs: Evidence[] = [];
   for (const file of request.files) {
     const path: unknown = isRecord(file) ? file.path : undefined;
-    if (typeof path !== "string" || isAbsolute(path) || path.split(/[\\/]/).includes("..")) {
+    // a drive or a leading backslash is absolute on Windows, so it is refused on every platform
+    if (
+      typeof path !== "string" ||
+      isAbsolute(path) ||
+      /^(?:[A-Za-z]:|\\)/.test(path) ||
+      path.split(/[\\/]/).includes("..")
+    ) {
       return refuse("A selected file is not a repository-relative path.");
     }
     let bytes: Buffer;

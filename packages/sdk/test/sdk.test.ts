@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadAdapterRegistry } from "../../../src/adapter-registry.ts";
 import { type AdapterDefinition, manifest, respond } from "../adapter.ts";
+import { contractAssert, folder } from "./support.ts";
 
 const toy: AdapterDefinition = {
   id: "toy",
@@ -114,4 +115,38 @@ await test("the manifest is a registry the core accepts, with every file pinned"
       ["toy/word", "policy", undefined],
     ],
   );
+});
+
+// the same toy adapter as a script, run through the shared contract that the other ports pass
+const adapter = fileURLToPath(new URL("../adapter.ts", import.meta.url));
+const TOY = `import { fileURLToPath } from "node:url";
+import { serve } from ${JSON.stringify(adapter)};
+
+const check = ({ text }) => {
+  if (text.includes("crash")) {
+    throw new Error("parser gave up");
+  }
+  if (text.includes("stray")) {
+    return [{ rule: "undeclared", message: "x" }];
+  }
+  return text.includes("bad") ? [{ rule: "word", message: "bad word", line: 1, column: 1 }] : [];
+};
+
+serve(
+  {
+    id: "toy",
+    version: "2.0.0",
+    files: ["**/*.toy"],
+    capabilities: ["policy"],
+    rules: [{ id: "word", description: "No bad words.", remedy: "Remove the word." }],
+    check,
+  },
+  fileURLToPath(import.meta.url),
+);
+`;
+
+await test("the TypeScript SDK keeps the adapter contract from request to registry", async (t) => {
+  const script = join(folder(t, "plumb-sdk-typescript-"), "toy.mts");
+  writeFileSync(script, TOY);
+  await contractAssert(t, [process.execPath, script]);
 });

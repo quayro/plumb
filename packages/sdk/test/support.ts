@@ -95,6 +95,9 @@ export async function contractAssert(t: TestContext, command: readonly string[])
     [request(["a.toy"], { action: "fix" }), "toy/protocol"],
     [request(["../outside.toy"]), "toy/protocol"],
     [request(["/etc/hosts"]), "toy/protocol"],
+    [request(["C:/a.toy"]), "toy/protocol"],
+    [request(["C:\\\\a.toy"]), "toy/protocol"],
+    [request(["\\\\a.toy"]), "toy/protocol"],
     ['"not a request"', "toy/protocol"],
     ["not json", "toy/protocol"],
   ] as const) {
