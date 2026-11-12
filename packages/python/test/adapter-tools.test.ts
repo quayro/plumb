@@ -166,6 +166,32 @@ await test("dynamic imports resolve aliases and refuse targets that cannot be ch
   assert.equal(unscoped.status, "pass");
 });
 
+await test("alias chains are followed to the end however long they are or in whatever order they are written", (t) => {
+  // each assignment reaches importlib only after the one below it has been resolved
+  const links = Array.from({ length: 9 }, (_, index) => `v${9 - index} = v${8 - index}`);
+  const source = `import importlib\n${links.join("\n")}\nv0 = importlib\nv9.import_module('os')\n`;
+  const output = fixture(
+    t,
+    { "chain.py": source },
+    { forbiddenImports: [{ module: "os", reason: "Use the reviewed boundary" }] },
+  ).direct();
+  assert.equal(output.status, "violation");
+  assert.equal(output.diagnostics[0].rule, "python/import");
+  assert.match(output.diagnostics[0].message, /Dynamic import of os is forbidden/);
+});
+
+await test("an alias that extends itself stops growing, so the check ends", (t) => {
+  // each round adds a longer path to item; without a limit the propagation never settles
+  const source =
+    "import pathlib\nitem = pathlib\nfor _ in range(3):\n    item = item.parent\n    item = item.stem\n";
+  const output = fixture(
+    t,
+    { "walk.py": source },
+    { forbiddenImports: [{ module: "os", reason: "Use the reviewed boundary" }] },
+  ).direct();
+  assert.equal(output.status, "pass");
+});
+
 await test("silent exception handlers and bare excepts are violations while handled errors pass", (t) => {
   const { direct } = fixture(t, {
     "bare.py": "try:\n    run()\nexcept:\n    raise\n",
@@ -232,6 +258,47 @@ await test("test files refuse skip, xfail and skip-call bypasses through aliases
       "test_plain.py",
       "test_unittest.py",
       "test_unittest.py",
+    ],
+  );
+});
+
+await test("expected failures, SkipTest raises and importorskip are skips in test files, through aliases too", (t) => {
+  const { direct } = fixture(t, {
+    "test_expected.py":
+      "import unittest\nclass T(unittest.TestCase):\n    @unittest.expectedFailure\n    def test_a(self):\n        self.assertEqual(1, 2)\n",
+    "test_raise.py": "import unittest\ndef test_a():\n    raise unittest.SkipTest('later')\n",
+    "test_raise_alias.py":
+      "from unittest import SkipTest as Skip\ndef test_a():\n    raise Skip('later')\n",
+    "test_importorskip.py": "import pytest\ndef test_a():\n    pytest.importorskip('zz')\n",
+    "test_importorskip_alias.py":
+      "import pytest as p\ndef test_a():\n    m = p.importorskip('zz')\n    assert m\n",
+    "helper.py":
+      "import unittest\nclass T(unittest.TestCase):\n    @unittest.expectedFailure\n    def helper(self):\n        pass\n",
+  });
+  const skips = direct().diagnostics.filter((item) => item.rule === "python/skip");
+  assert.deepEqual(
+    skips.map((item) => item.path),
+    [
+      "test_expected.py",
+      "test_importorskip.py",
+      "test_importorskip_alias.py",
+      "test_raise.py",
+      "test_raise_alias.py",
+    ],
+  );
+});
+
+await test("test skips report the columns the source really has after U+2028 and form feed characters", (t) => {
+  const { direct } = fixture(t, {
+    "test_separator.py": 's = "a\u2028é"\nx = pytest.skip("later")\n',
+    "test_formfeed.py": 's = "a\fb"\nx = pytest.skip("later")\n',
+  });
+  const skips = direct().diagnostics.filter((item) => item.rule === "python/skip");
+  assert.deepEqual(
+    skips.map((item) => [item.path, item.line, item.column]),
+    [
+      ["test_formfeed.py", 2, 5],
+      ["test_separator.py", 2, 5],
     ],
   );
 });

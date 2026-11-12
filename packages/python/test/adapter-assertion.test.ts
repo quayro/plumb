@@ -249,6 +249,44 @@ await test("assertions after an unconditional top-level return or raise are dead
   );
 });
 
+await test("assertions in a branch that a constant test makes dead do not count", (t) => {
+  assert.deepEqual(
+    reported(
+      {
+        "test_guarded.py": source(
+          "import os",
+          "def test_false():",
+          "    if False:",
+          "        assert os.getcwd()",
+          "def test_true_else():",
+          "    if True:",
+          "        pass",
+          "    else:",
+          "        assert os.getcwd()",
+          "def test_not_false():",
+          "    if not False:",
+          "        pass",
+          "    else:",
+          "        assert os.getcwd()",
+          "def test_live():",
+          "    if True:",
+          "        assert os.getcwd()",
+          "def test_false_else():",
+          "    if False:",
+          "        pass",
+          "    else:",
+          "        assert os.getcwd()",
+          "def test_unknown(value):",
+          "    if value:",
+          "        assert os.getcwd()",
+        ),
+      },
+      t,
+    ).map((item) => item[1]),
+    ["test_false", "test_true_else", "test_not_false"],
+  );
+});
+
 await test("pytest and mock names must be called, and only the test's own self counts for unittest", (t) => {
   assert.deepEqual(
     reported(
