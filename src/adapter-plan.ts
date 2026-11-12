@@ -101,6 +101,17 @@ const UNSUPPORTED = new Set([
   ".svelte",
   ".astro",
   ".mdx",
+  ".rb",
+  ".rake",
+  ".gemspec",
+  ".c",
+  ".cc",
+  ".cpp",
+  ".cxx",
+  ".h",
+  ".hh",
+  ".hpp",
+  ".hxx",
 ]);
 
 export const issue = (rule: string, path: string, message: string, check?: string): Diagnostic => ({
