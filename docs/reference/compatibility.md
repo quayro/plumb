@@ -13,16 +13,16 @@
 
 ## Languages
 
-| Language                 | Provided by                    | Syntax or types     | Lint and policy            | Format            | Boundaries                      |
-| ------------------------ | ------------------------------ | ------------------- | -------------------------- | ----------------- | ------------------------------- |
-| TypeScript, JavaScript   | JavaScript pack (`typescript`) | TypeScript Programs | ESLint, Knip               | Prettier          | imports, exports, API surface   |
-| React                    | JavaScript pack (`react`)      | TypeScript Programs | ESLint with React rules    | Prettier          | imports, exports, API surface   |
-| Ruby                     | native (`ruby`)                | RuboCop             | RuboCop                    | RuboCop           |                                 |
-| C and C++                | native (`cpp`)                 | clang-tidy          | clang-tidy                 | clang-format      |                                 |
-| Python                   | adapter (`python`)             | `ast` and `compile` | directives, skips, excepts |                   | forbidden and dynamic imports   |
-| Go                       | adapter (`go`)                 | tokenizer           | directives, skips          |                   | forbidden imports               |
-| Any text                 | core                           |                     | custom rules, comments     | tables, JSON keys | file names, required, forbidden |
-| SQL, shell, TOML, Prisma | core `format.tools`            |                     |                            | pinned formatter  |                                 |
+See [language profiles](../guides/languages.md) for the commands each profile runs.
+
+| Language                 | Provided by                               | Syntax or types                  | Lint and policy                              | Format            | Boundaries                      |
+| ------------------------ | ----------------------------------------- | -------------------------------- | -------------------------------------------- | ----------------- | ------------------------------- |
+| TypeScript, JavaScript   | JavaScript pack (`typescript`)            | TypeScript Programs              | ESLint, Knip                                 | Prettier          | imports, exports, API surface   |
+| React                    | JavaScript pack (`react`)                 | TypeScript Programs              | ESLint with React rules                      | Prettier          | imports, exports, API surface   |
+| Python                   | native (`python`) with adapter (`python`) | mypy strict, `ast` and `compile` | ruff, directives, skips, excepts, assertions | ruff format       | forbidden and dynamic imports   |
+| Rust                     | native (`rust`) with adapter (`rust`)     | cargo clippy                     | clippy, directives, skips                    | rustfmt           | forbidden paths                 |
+| Any text                 | core                                      |                                  | custom rules, comments                       | tables, JSON keys | file names, required, forbidden |
+| SQL, shell, TOML, Prisma | core `format.tools`                       |                                  |                                              | pinned formatter  |                                 |
 
 ## Capabilities by surface
 

@@ -49,14 +49,14 @@ await test("strict schema rejects unknown fields, missing reasons, escape paths 
     { checks: [] },
     { schemVersion: 1 },
     { exclude: [{ files: ["src/**"] }] },
-    { projects: [{ root: "../outside", profile: "ruby" }] },
+    { projects: [{ root: "../outside", profile: "python" }] },
     {
       exceptions: [{ id: "debt", rules: ["files.names"], files: ["src/**"], reason: " ", max: 1 }],
     },
     {
       projects: [
-        { root: ".", profile: "ruby" },
-        { root: "./", profile: "ruby" },
+        { root: ".", profile: "python" },
+        { root: "./", profile: "python" },
       ],
     },
   ]) {
@@ -302,37 +302,28 @@ await test("timeouts also stop subprocess trees without waiting on inherited pip
   assert.ok(Date.now() - began < 5000);
 });
 
-await test("Ruby build files count as source and require profile coverage", async (t) => {
-  for (const file of ["Gemfile", "Rakefile"]) {
+await test("Python sources require profile coverage and pass the explicit tool checks", async (t) => {
+  for (const file of ["tool.py", "pkg/mod.py"]) {
     const { root } = fixture(
       t,
-      { projects: [{ root: ".", profile: "ruby" }] },
-      { [file]: "require 'rake'\n" },
+      { projects: [{ root: ".", profile: "python" }] },
+      { [file]: "x = 1\n" },
     );
     assert.equal((await cli(["sync", "--root", root])).code, 0);
     const checked = await checkRepository({
       root,
       execute: async (command) => ({
         code: 0,
-        stdout: command.includes("--version")
-          ? "1.0.0"
-          : JSON.stringify({
-              files: [{ path: file, offenses: [] }],
-              summary: { inspected_file_count: 1 },
-            }),
+        stdout: command.includes("--version") ? "1.0.0" : "",
         stderr: "",
       }),
     });
     assert.equal(checked.exitCode, 0, JSON.stringify(checked.diagnostics));
   }
-  const { root } = fixture(
-    t,
-    { preset: "ozmikhail" },
-    { Gemfile: "source 'https://rubygems.org'\n" },
-  );
+  const { root } = fixture(t, { preset: "ozmikhail" }, { "tool.py": "x = 1\n" });
   assert.ok(
     (await checkRepository({ root })).diagnostics.some(
-      (item) => item.rule === "projects.uncovered" && item.path === "Gemfile",
+      (item) => item.rule === "projects.uncovered" && item.path === "tool.py",
     ),
   );
 });

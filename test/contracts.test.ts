@@ -92,8 +92,8 @@ await test("ozmikhail preserves language-specific file and folder conventions", 
     {
       "AGENTS.md": "# Agents\n",
       "src/session.integration.test.ts": "",
-      "lib/user_store.rb": "",
-      "src/net/tcp_socket.cpp": "",
+      "lib/user_store.py": "",
+      "src/net/tcp_socket.rs": "",
       ".github/scripts/release-notes.ts": "",
       "ui/button.module.css": "",
     },
@@ -103,8 +103,8 @@ await test("ozmikhail preserves language-specific file and folder conventions", 
     {
       "AGENTS.md": "# Agents\n",
       "src/BadFile.tsx": "",
-      "lib/user-store.rb": "",
-      "net-io/socket.cpp": "",
+      "lib/user-store.py": "",
+      "net-io/socket.rs": "",
     },
     (check) => {
       assert.equal(

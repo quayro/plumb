@@ -75,12 +75,8 @@ export function context(options: EngineOptions = {}): Context {
     throw new Error("Sync cannot generate its own policy file");
   }
   const ownedFiles = assets.assetsFor(loaded.config).map((file) => file.path);
-  const databases = loaded.config.projects
-    .filter((project) => project.profile === "cpp")
-    .map((project) => `${project.compileCommands}/compile_commands.json`);
   const explicit = [
     ...ownedFiles,
-    ...databases,
     ...protectedFiles,
     ...(loaded.config.files?.required ?? []),
     ...(loaded.config.docs?.index ? [loaded.config.docs.index] : []),

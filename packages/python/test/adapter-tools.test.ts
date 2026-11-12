@@ -213,13 +213,17 @@ await test("test files refuse skip, xfail and skip-call bypasses through aliases
     "test_unittest.py":
       "import unittest as u\nclass T(u.TestCase):\n    @u.skipIf(True, 'x')\n    def test_e(self):\n        self.skipTest('no')\n",
     "test_marks.py": "import pytest\nparam = pytest.param(1, marks=pytest.mark.skip)\n",
-    "test_clean.py": "import pytest\ndef test_ok():\n    assert True\n",
+    "test_clean.py":
+      "import pytest\ndef test_ok():\n    with pytest.raises(ValueError):\n        int('x')\n",
     "helper.py": "import pytest\npytest.skip('helpers are not tests')\n",
   });
   const output = direct();
   assert.equal(output.status, "violation");
+  // these fixtures have empty bodies on purpose; python/assertion has its own tests in
+  // adapter-assertion.test.ts
+  const skips = output.diagnostics.filter((item) => item.rule === "python/skip");
   assert.deepEqual(
-    output.diagnostics.map((item) => item.path),
+    skips.map((item) => item.path),
     [
       "api_test.py",
       "test_alias.py",
@@ -230,5 +234,4 @@ await test("test files refuse skip, xfail and skip-call bypasses through aliases
       "test_unittest.py",
     ],
   );
-  assert.ok(output.diagnostics.every((item) => item.rule === "python/skip"));
 });

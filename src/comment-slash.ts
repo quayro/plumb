@@ -1,4 +1,4 @@
-export interface Found {
+interface Found {
   index: number;
   text: string;
   block: boolean;
@@ -9,34 +9,66 @@ export interface Scan {
   issues: { index: number; message: string }[];
 }
 
-export function slashComments(original: string, language: string): Scan {
+const RUST_RAW = /[bc]?r(#*)"/y; // a raw string opener: r#" or br" or cr##"
+
+const matchAt = (pattern: RegExp, source: string, index: number): RegExpExecArray | null => {
+  pattern.lastIndex = index;
+  return pattern.exec(source);
+};
+
+// the marker of a documentation line is three characters: prisma's ///, Rust's /// and //!
+const lineMarker = (source: string, index: number, language: string): number => {
+  if (language === "prisma") {
+    return source[index + 2] === "/" ? 3 : 2;
+  }
+  if (language === "rust") {
+    const doc =
+      source[index + 2] === "!" || (source[index + 2] === "/" && source[index + 3] !== "/");
+    return doc ? 3 : 2;
+  }
+  return 2;
+};
+
+// JavaScript-family, CSS, SQL, prisma and Rust comments; Rust shares the // and nested /* */ rules
+export function slashComments(source: string, language: string): Scan {
   const found: Found[] = [];
   const issues: Scan["issues"] = [];
-  // C/C++ line splicing happens before tokenization; retain original source positions.
-  const positions: number[] = [];
-  let source = "";
-  for (let at = 0; at < original.length; at++) {
-    const splice = language === "cpp" && /^\\\r?\n/.exec(original.slice(at));
-    if (splice) {
-      at += splice[0].length - 1;
-    } else {
-      positions.push(at);
-      source += original[at];
-    }
-  }
-  const issue = (index: number, message: string): number =>
-    issues.push({ index: positions[index] ?? original.length, message });
+  const issue = (index: number, message: string): number => issues.push({ index, message });
+  const nested = language === "sql" || language === "rust";
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     const raw =
-      language === "cpp" && /^(?:u8|u|U|L)?R"([^ ()\\\t\r\n]{0,16})\(/.exec(source.slice(index));
+      language === "rust" && !/\w/.test(source[index - 1] ?? "")
+        ? matchAt(RUST_RAW, source, index)
+        : null;
     if (raw) {
-      const end = source.indexOf(`)${raw[1]}"`, index + raw[0].length);
+      const hashes = raw[1];
+      const end = source.indexOf(`"${hashes}`, index + raw[0].length);
       if (end < 0) {
-        issue(index, "A C++ raw string is not closed.");
+        issue(index, "A Rust raw string is not closed.");
         break;
       }
-      index = end + raw[1].length + 1;
+      index = end + hashes.length;
+      continue;
+    }
+    if (language === "rust" && char === "'") {
+      if (source[index + 1] === "\\") {
+        let end = index + 1;
+        while (end < source.length && source[end] !== "'") {
+          end += source[end] === "\\" ? 2 : 1;
+        }
+        if (end >= source.length) {
+          issue(index, "A Rust character literal is not closed.");
+          break;
+        }
+        index = end;
+        continue;
+      }
+      // 'x' is a character; anything else after the quote is a lifetime or label, whose name is code
+      const width = (source.codePointAt(index + 1) ?? 0) > 0xffff ? 2 : 1;
+      if (source[index + 1 + width] === "'") {
+        index += 1 + width;
+      }
       continue;
     }
     const dollar = language === "sql" && /^\$(?:[A-Za-z_]\w*)?\$/.exec(source.slice(index));
@@ -72,15 +104,7 @@ export function slashComments(original: string, language: string): Scan {
       index = end;
       continue;
     }
-    const separator =
-      language === "cpp" &&
-      char === "'" &&
-      /[\da-f]/i.test(source[index + 1] ?? "") &&
-      /\b(?:0[xX][\da-fA-F']*|0[bB][01']*|\d[\w.']*)$/.test(source.slice(0, index));
-    if (separator) {
-      continue;
-    }
-    if (char === '"' || (char === "'" && ["cpp", "css", "sql"].includes(language))) {
+    if (char === '"' || (char === "'" && ["css", "sql"].includes(language))) {
       let end = index + 1;
       for (; end < source.length; end++) {
         if (
@@ -105,10 +129,10 @@ export function slashComments(original: string, language: string): Scan {
     }
     const line = language === "sql" ? "--" : "//";
     if (language !== "css" && source.startsWith(line, index)) {
-      const delimiter = language === "prisma" && source[index + 2] === "/" ? 3 : 2;
+      const delimiter = lineMarker(source, index, language);
       const end = source.indexOf("\n", index);
       found.push({
-        index: positions[index],
+        index,
         text: source.slice(index + delimiter, end < 0 ? source.length : end),
         block: false,
       });
@@ -118,7 +142,7 @@ export function slashComments(original: string, language: string): Scan {
       let depth = 1;
       index += 2;
       for (; index < source.length && depth; index++) {
-        if (language === "sql" && source.startsWith("/*", index)) {
+        if (nested && source.startsWith("/*", index)) {
           depth++;
           index++;
         } else if (source.startsWith("*/", index)) {
@@ -131,7 +155,7 @@ export function slashComments(original: string, language: string): Scan {
         break;
       }
       found.push({
-        index: positions[start],
+        index: start,
         text: source.slice(start + 2, index - 2),
         block: true,
       });

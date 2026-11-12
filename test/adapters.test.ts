@@ -48,7 +48,7 @@ await test("unapproved profiles and unowned registered source cannot silently di
   };
   assert.ok(
     planAdapters(unowned, { registry: approved }).diagnostics.some(
-      (item) => item.rule === "projects.uncovered" && item.path === "main.py",
+      (item) => item.rule === "projects.uncovered" && item.path === "main.lua",
     ),
   );
 });
@@ -56,7 +56,7 @@ await test("unapproved profiles and unowned registered source cannot silently di
 await test("registry checks code boundaries, hashes, executable pins and option schemas", (t) => {
   const { root, registry, registryFile, script } = fixture(t);
   const approved = registry();
-  assert.equal(approved?.adapters[0]?.id, "python");
+  assert.equal(approved?.adapters[0]?.id, "lua");
   writeFileSync(join(root, "registry.json"), readFileSync(registryFile));
   assert.throws(
     () => loadAdapterRegistry(join(root, "registry.json"), root),
@@ -112,18 +112,21 @@ await test("registry checks code boundaries, hashes, executable pins and option 
 });
 
 await test("an actual external process returns file coverage, source hashes and precise findings", async (t) => {
-  const { ctx, registry } = fixture(t, { "main.py": "print('ok')\n", "nested/bad.py": "ERROR\n" });
+  const { ctx, registry } = fixture(t, {
+    "main.lua": "print('ok')\n",
+    "nested/bad.lua": "ERROR\n",
+  });
   const approved = registry(),
     planned = planAdapters(ctx, { registry: approved });
   const result = await runAdapters(ctx, planned, { registry: approved });
   assert.deepEqual(
     result.diagnostics.map(({ rule, path }) => [rule, path]),
-    [["python/syntax", "nested/bad.py"]],
+    [["lua/syntax", "nested/bad.lua"]],
   );
   assert.equal(result.coverage[0].completed, true);
   assert.equal(result.coverage[0].status, "violation");
   assert.equal(result.coverage[0].evidence, "adapter-reported");
-  assert.deepEqual(result.coverage[0].checkedFiles, ["main.py", "nested/bad.py"]);
+  assert.deepEqual(result.coverage[0].checkedFiles, ["main.lua", "nested/bad.lua"]);
   assert.equal(result.versions.node, process.versions.node);
 });
 
@@ -131,7 +134,7 @@ await test("external input evidence hashes original bytes through both context r
   const bytes = Buffer.from("# coding: latin-1\nname = 'caf\xe9'\n", "latin1");
   assert.notEqual(digest(bytes), digest(bytes.toString("utf8")));
   for (const rawReader of [false, true]) {
-    const { ctx, registry } = fixture(t, { "main.py": bytes });
+    const { ctx, registry } = fixture(t, { "main.lua": bytes });
     let reads = 0;
     if (rawReader) {
       ctx.readBytes = (path) => {
@@ -179,23 +182,23 @@ await test("empty, unexpected and duplicate coverage cannot claim successful com
   const planned: PlannedCheck[] = [
     {
       id: "syntax:.",
-      adapter: "python",
+      adapter: "lua",
       capability: "syntax",
       root: ".",
-      files: ["a.py"],
+      files: ["a.lua"],
       evidence: "adapter-reported",
     },
   ];
   for (const returned of [
     [],
     [{ id: "syntax:.", checkedFiles: [], status: "pass" }],
-    [{ id: "syntax:.", checkedFiles: ["other.py"], status: "pass" }],
-    [{ id: "syntax:.", checkedFiles: ["a.py", "a.py"], status: "pass" }],
+    [{ id: "syntax:.", checkedFiles: ["other.lua"], status: "pass" }],
+    [{ id: "syntax:.", checkedFiles: ["a.lua", "a.lua"], status: "pass" }],
     [
       {
         id: "syntax:.",
         checkedFiles: [],
-        notApplicable: [{ path: "a.py", reason: "ignored" }],
+        notApplicable: [{ path: "a.lua", reason: "ignored" }],
         status: "not-applicable",
       },
     ],
@@ -210,7 +213,7 @@ await test("empty, unexpected and duplicate coverage cannot claim successful com
       {
         id: "syntax:.",
         checkedFiles: [],
-        notApplicable: [{ path: "a.py", reason: "No supported parser" }],
+        notApplicable: [{ path: "a.lua", reason: "No supported parser" }],
         status: "not-applicable",
       },
     ]).coverage[0].status,
@@ -221,7 +224,7 @@ await test("empty, unexpected and duplicate coverage cannot claim successful com
       {
         id: "syntax:.",
         checkedFiles: [],
-        notApplicable: [{ path: "a.py", reason: "No supported parser" }],
+        notApplicable: [{ path: "a.lua", reason: "No supported parser" }],
         status: "pass",
       },
     ]).diagnostics.length,
@@ -234,8 +237,8 @@ await test("external protocol rejects missing hashes, out-of-scope claims and co
     "response.inputs[0].sha256 = '0'.repeat(64);",
     "response.coverage[0].files = [];",
     "response.coverage.push(response.coverage[0]);",
-    "response.diagnostics = [{rule:'python/unknown',path:'main.py',message:'unknown'}]; response.status='violation';",
-    "response.diagnostics = [{rule:'python/syntax',path:'../outside.py',message:'outside'}]; response.status='violation';",
+    "response.diagnostics = [{rule:'lua/unknown',path:'main.lua',message:'unknown'}]; response.status='violation';",
+    "response.diagnostics = [{rule:'lua/syntax',path:'../outside.lua',message:'outside'}]; response.status='violation';",
     "response.versions.node = '0.0.0';",
   ];
   for (const edit of edits) {

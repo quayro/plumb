@@ -193,17 +193,17 @@ await test("excludes, format ignores, protected lists and projects classify by d
     ["tighten /policy/protected/1"],
   );
   assert.deepEqual(
-    classes({ projects: [{ root: "packages/a", profile: "ruby" }] }, { projects: [] }),
+    classes({ projects: [{ root: "packages/a", profile: "python" }] }, { projects: [] }),
     ["weaken /projects/0"],
   );
   assert.deepEqual(
-    classes({ projects: [] }, { projects: [{ root: "packages/a", profile: "ruby" }] }),
+    classes({ projects: [] }, { projects: [{ root: "packages/a", profile: "python" }] }),
     ["tighten /projects/0"],
   );
   assert.ok(
     classes(
-      { projects: [{ root: "packages/a", profile: "ruby" }] },
-      { projects: [{ root: "packages/b", profile: "ruby" }] },
+      { projects: [{ root: "packages/a", profile: "python" }] },
+      { projects: [{ root: "packages/b", profile: "python" }] },
     ).includes("weaken /projects/0"),
   );
   assert.deepEqual(classes({ preset: "portable" }, { preset: "ozmikhail" }), ["tighten /preset"]);

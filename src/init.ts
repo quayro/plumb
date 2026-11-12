@@ -10,15 +10,12 @@ import { run } from "./process.ts";
 
 const PROFILES: [string, RegExp][] = [
   ["typescript", /\.[cm]?[jt]sx?$/],
-  ["ruby", /\.(?:rb|rake|gemspec)$|(?:^|\/)(?:Gemfile|Rakefile)$/],
-  ["cpp", /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx)$/],
-  ["python", /\.py$/],
-  ["go", /\.go$/],
+  ["python", /\.pyi?$/],
   ["rust", /\.rs$/],
 ];
 
 // profiles the core checks itself; the others need an approved adapter before they can be checked
-const BUILT_IN = ["typescript", "react", "ruby", "cpp"];
+const BUILT_IN = ["typescript", "react", "python", "rust"];
 
 const TYPES = ["application", "library", "documentation"];
 
@@ -130,11 +127,7 @@ export async function init(options: CliOptions, ask?: Ask): Promise<Report> {
     ...(selected.length
       ? { bundles: selected.map(({ path: bundle, sha256 }) => ({ path: bundle, sha256 })) }
       : {}),
-    projects: profiles.map((profile) => ({
-      root: ".",
-      profile,
-      ...(profile === "cpp" ? { compileCommands: "build" } : {}),
-    })),
+    projects: profiles.map((profile) => ({ root: ".", profile })),
   };
   const written: string[] = [];
   const create = (file: string, content: string): void => {

@@ -33,7 +33,11 @@ serve(
 
 `node adapter.ts --manifest > registry.json` prints the registry entry: the runtime, the script and the SDK, each pinned by its SHA-256. Keep the adapter and its registry outside the candidate repository and pass the registry with `--adapters`. A project selects the adapter by `profile`.
 
-The SDK verifies every source against the hash in the request, namespaces rule ids, reports unreadable input as `ID/input` and a malformed request as `ID/protocol`, and exits with the code that matches its status. The [Go adapter](../../packages/go/README.md) and the [Python adapter](../../packages/python/README.md) are complete examples, one on the SDK and one without it.
+The SDK verifies every source against the hash in the request, namespaces rule ids, reports unreadable input as `ID/input` and a malformed request as `ID/protocol`, and exits with the code that matches its status. The [Rust adapter](../../packages/rust/README.md) and the [Python adapter](../../packages/python/README.md) are complete examples, one on the SDK and one without it.
+
+The SDK is also one file for [Python](../../packages/sdk/README.md#python) and one for [Rust](../../packages/sdk/README.md#rust), with the same contract and the same tests.
+
+An adapter whose id is `python` or `rust` adds source policy to the built-in profile of that name: the project runs its tools and the adapter, and its `options` are the adapter's.
 
 ## Protocol
 

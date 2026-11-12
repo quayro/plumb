@@ -35,7 +35,7 @@ Coding agents can overlook instructions, and people can disagree about conventio
 | :-: | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
 | 📁  | **Repository structure**     | Required or forbidden files, names, companion files, and generated assets.                             |
 | 🧩  | **Architecture**             | Module boundaries, dependency restrictions, ownership, imports, exports, and public API snapshots.     |
-| 🛠️  | **Language-aware checks**    | Optional engines for TypeScript/JavaScript, React, Python, Go, Ruby, and C/C++.                        |
+| 🛠️  | **Language-aware checks**    | Engines for TypeScript/JavaScript, React, Python, and Rust: format, lint, types and source policy.     |
 | 📝  | **Documentation & commits**  | Documentation structure, generated regions, links, task markers, and commit subjects.                  |
 | ✅  | **Verification**             | Required test suites, fresh test reports, coverage thresholds, and controlled exceptions.              |
 | 🔒  | **Policy integrity**         | Pinned policy bundles, protected files, policy-diff checks, and checks that cannot silently skip work. |

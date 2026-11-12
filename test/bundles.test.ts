@@ -179,7 +179,7 @@ await test("nested bundles can forward path bindings without interpolating regul
   const base = write("base.json", {
     schemaVersion: 1,
     preset: "portable",
-    projects: [{ root: "${root}", profile: "ruby" }],
+    projects: [{ root: "${root}", profile: "python" }],
     files: {
       names: [{ files: ["${root}/**"], pattern: "^${literal}$", reason: "literal pattern" }],
     },

@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreBinaries": ["taskkill.exe"],
+  "ignoreBinaries": ["rustc", "taskkill.exe"],
   "workspaces": {
     ".": {
       "entry": [
@@ -9,8 +9,8 @@
         "packages/python/test/*.test.ts",
         "packages/sdk/adapter.ts",
         "packages/sdk/test/*.test.ts",
-        "packages/go/adapter.ts",
-        "packages/go/test/*.test.ts"
+        "packages/rust/adapter.ts",
+        "packages/rust/test/*.test.ts"
       ],
       "project": [
         "bin/**/*.ts",
@@ -19,7 +19,7 @@
         "test/**/*.ts",
         "packages/python/test/**/*.ts",
         "packages/sdk/**/*.ts",
-        "packages/go/**/*.ts"
+        "packages/rust/**/*.ts"
       ]
     },
     "packages/javascript": {

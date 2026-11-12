@@ -49,7 +49,7 @@ Usage: plumb <command> [options]
   --output FILE         save JSON, SARIF or a repair plan outside the project
   --cache DIRECTORY     reuse unchanged deterministic core results outside CI
   --format FORMAT       text, json, or sarif (check only)
-  --profile PROFILE     init a typescript, react, ruby, cpp or generic project (default: detect)
+  --profile PROFILE     init a typescript, react, python, rust or generic project (default: detect)
   --preset PRESET       init with ozmikhail (default) or portable
   --pack NAMES          init with these comma-separated packs, copied and pinned as bundles
   --type TYPE           init with the packs for an application, library or documentation

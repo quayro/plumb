@@ -44,7 +44,7 @@ interface AdapterFixture {
 
 export function fixture(
   t: TestContext,
-  files: Record<string, string | Buffer> = { "main.py": "print('ok')\n" },
+  files: Record<string, string | Buffer> = { "main.lua": "print('ok')\n" },
   config: Record<string, unknown> = {},
 ): AdapterFixture {
   const parent = mkdtempSync(join(temporary, "plumb-adapters-")),
@@ -63,7 +63,7 @@ export function fixture(
   const policy = definePlumb({
     schemaVersion: 1,
     preset: "portable",
-    projects: [{ root: ".", profile: "python" }],
+    projects: [{ root: ".", profile: "lua" }],
     ...config,
   });
   const observed = new Map<string, string | null>();
@@ -102,9 +102,9 @@ export function fixture(
   ): ReturnType<typeof loadAdapterRegistry> => {
     writeFileSync(script, program.replace("RESPONSE_EDIT", edit));
     const descriptor = {
-      id: "python",
+      id: "lua",
       version: "1.0.0",
-      files: ["**/*.py"],
+      files: ["**/*.lua"],
       capabilities: ["syntax"],
       command: [nodeExecutable, script],
       integrity: [
@@ -115,7 +115,7 @@ export function fixture(
       tools: { node: process.versions.node },
       rules: [
         {
-          id: "python/syntax",
+          id: "lua/syntax",
           description: "Python syntax is valid",
           remedy: "Correct source syntax",
         },

@@ -211,14 +211,14 @@ await test("an external approved policy remains protected from tool mutations", 
 });
 
 await test("tool versions are probed for distinct project environments", async () => {
-  const ctx = { root: ".", config: { tools: { versions: { rubocop: "1.0.0" } } } };
+  const ctx = { root: ".", config: { tools: { versions: { ruff: "1.0.0" } } } };
   const steps = ["one", "two"].map((name) => ({
-    id: `ruby.lint:${name}`,
-    rule: "ruby.lint",
-    tool: "rubocop",
+    id: `python.lint:${name}`,
+    rule: "python.lint",
+    tool: "ruff",
     cwd: name,
-    command: ["bundle", "exec", "rubocop", "check"],
-    versionCommand: ["bundle", "exec", "rubocop", "--version"],
+    command: ["ruff", "check"],
+    versionCommand: ["ruff", "--version"],
   }));
   const ran: (string | undefined)[] = [];
   const execute: Execute = async (command, { cwd } = {}) => {
@@ -234,14 +234,14 @@ await test("tool versions are probed for distinct project environments", async (
 });
 
 await test("a mismatched cached version cannot allow a later tool invocation", async () => {
-  const ctx = { root: ".", config: { tools: { versions: { rubocop: "1.0.0" } } } };
+  const ctx = { root: ".", config: { tools: { versions: { ruff: "1.0.0" } } } };
   const steps = ["one", "two"].map((id) => ({
     id,
-    rule: "ruby.lint",
-    tool: "rubocop",
+    rule: "python.lint",
+    tool: "ruff",
     cwd: ".",
-    command: ["rubocop", "--autocorrect"],
-    versionCommand: ["rubocop", "--version"],
+    command: ["ruff", "format"],
+    versionCommand: ["ruff", "--version"],
   }));
   let ran = 0;
   const result = await executeSteps(ctx, steps, async (command) => {
@@ -315,9 +315,9 @@ await test("safePath excludes repository metadata even when the directory exists
 await test("native command configuration errors are incomplete rather than violations", async () => {
   const result = await executeSteps(
     { root: ".", config: {} },
-    [{ id: "ruby.lint:.", rule: "ruby.lint", command: ["rubocop"], cwd: "." }],
+    [{ id: "python.lint:.", rule: "python.lint", command: ["ruff"], cwd: "." }],
     async () => ({ code: 2, stdout: "", stderr: "unknown option" }),
   );
   assert.equal(result.checks[0].status, "incomplete");
-  assert.equal(result.diagnostics[0].rule, "ruby.lint");
+  assert.equal(result.diagnostics[0].rule, "python.lint");
 });

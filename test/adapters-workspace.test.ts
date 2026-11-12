@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { CoverageRecord } from "../src/adapter-native.ts";
 import { doctorAdapters, type JavascriptPack, planAdapters, runAdapters } from "../src/adapters.ts";
 import { definePlumb } from "../src/config.ts";
-import type { Execute } from "../src/process.ts";
+import { type Execute, run } from "../src/process.ts";
 import { fixture } from "./adapters-support.ts";
 import { fakePack } from "./support.ts";
 
@@ -34,7 +34,7 @@ await test("checks and doctor reject changes to observed source inputs", async (
   for (const doctor of [false, true]) {
     const { ctx, registry } = fixture(t);
     const approved = registry(
-      "const {writeFileSync} = await import('node:fs'); writeFileSync(resolve(request.root, 'main.py'), 'changed\\n');",
+      "const {writeFileSync} = await import('node:fs'); writeFileSync(resolve(request.root, 'main.lua'), 'changed\\n');",
     );
     const result = doctor
       ? await doctorAdapters(ctx, { registry: approved })
@@ -52,7 +52,7 @@ await test("checks and doctor reject changes to observed source inputs", async (
 });
 
 await test("doctor probes an external adapter without claiming executed source checks", async (t) => {
-  const { ctx, registry } = fixture(t),
+  const { ctx, registry } = fixture(t, { "main.lua": "print('ok')\n", "tool.py": "print(1)\n" }),
     approved = registry();
   const result = await doctorAdapters(ctx, { registry: approved });
   assert.deepEqual(result.diagnostics, []);
@@ -65,66 +65,135 @@ await test("doctor probes an external adapter without claiming executed source c
   assert.equal(suggestions.suggestions[0].project.profile, "python");
 });
 
-await test("native Ruby checks require RuboCop's inspected-file evidence", async (t) => {
+await test("native Python checks pass only when each tool reports its explicit inputs", async (t) => {
   const { ctx } = fixture(
     t,
-    { "main.rb": "puts 'ok'\n" },
-    { projects: [{ root: ".", profile: "ruby" }] },
+    { "main.py": "print('ok')\n" },
+    { projects: [{ root: ".", profile: "python" }] },
   );
-  const execute =
-    (files: string[]): Execute =>
-    async (command) =>
-      command.at(-1) === "--version"
-        ? { code: 0, stdout: "1.0.0", stderr: "" }
-        : {
-            code: 0,
-            stdout: JSON.stringify({
-              files: files.map((path) => ({ path, offenses: [] })),
-              summary: { inspected_file_count: files.length },
-            }),
-            stderr: "",
-          };
   const planned = planAdapters(ctx);
-  const complete = await runAdapters(ctx, planned, { execute: execute(["main.rb"]) });
-  assert.deepEqual(complete.diagnostics, []);
-  assert.equal(complete.coverage[0].evidence, "tool-reported");
-  const absent = await runAdapters(ctx, planned, { execute: execute([]) });
-  assert.ok(absent.diagnostics.some((item) => item.status === "incomplete"));
-  const malformed = await runAdapters(ctx, planned, {
-    execute: async () => ({ code: 0, stdout: "1.0.0", stderr: "" }),
+  const passing: Execute = async (command) => ({
+    code: 0,
+    stdout: command.at(-1) === "--version" ? "1.0.0" : "",
+    stderr: "",
   });
-  assert.ok(malformed.diagnostics.some((item) => item.rule === "adapters.protocol"));
+  const result = await runAdapters(ctx, planned, { execute: passing });
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(result.coverage.map((item) => item.id).sort(), [
+    "python.format:.",
+    "python.lint:.",
+    "python.types:.",
+  ]);
+  assert.ok(
+    result.coverage.every(
+      (item) => item.evidence === "explicit-inputs" && item.checkedFiles.join() === "main.py",
+    ),
+  );
+  // a tool that cannot finish is incomplete, never a pass
+  const crashed = await runAdapters(ctx, planned, {
+    execute: (command) =>
+      command[0] === "mypy"
+        ? Promise.resolve({ code: 2, stdout: "", stderr: "mypy crashed" })
+        : passing(command),
+  });
+  assert.ok(crashed.diagnostics.some((item) => item.status === "incomplete"));
+  assert.equal(crashed.coverage.find((item) => item.id === "python.types:.")?.status, "incomplete");
 });
 
-await test("C++ coverage identifies explicit translation-unit inputs without claiming header inspection", async (t) => {
-  const { ctx, root, write } = fixture(
+await test("native Rust coverage names the files rustfmt checked and clippy's project scope", async (t) => {
+  const { ctx, root } = fixture(
     t,
     {
-      "main.cpp": "int main() {}\n",
-      "main.hpp": "",
-      ".clang-format-ignore": "# none\n",
-      "build/compile_commands.json": "[]",
+      "Cargo.toml": '[package]\nname = "demo"\nversion = "0.1.0"\n',
+      "src/main.rs": "fn main() {}\n",
     },
-    { projects: [{ root: ".", profile: "cpp", compileCommands: "build" }] },
-  );
-  write(
-    "build/compile_commands.json",
-    JSON.stringify([{ directory: root, file: "main.cpp", arguments: ["c++", "-c", "main.cpp"] }]),
+    { projects: [{ root: ".", profile: "rust" }] },
   );
   const result = await runAdapters(ctx, planAdapters(ctx), {
-    execute: async (command) => ({
-      code: 0,
-      stdout: command.at(-1) === "--version" ? "18.1.8" : "",
-      stderr: "",
-    }),
+    execute: async (command) => {
+      if (command.at(-1) === "--version") {
+        return { code: 0, stdout: "1.0.0", stderr: "" };
+      }
+      if (command.includes("fmt")) {
+        return { code: 0, stdout: `Formatting ${join(root, "src/main.rs")}\n`, stderr: "" };
+      }
+      return {
+        code: 0,
+        stdout: `${JSON.stringify({ reason: "build-finished", success: true })}\n`,
+        stderr: "",
+      };
+    },
   });
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.coverage.find((item) => item.id === "cpp.lint:.")?.checkedFiles, [
-    "main.cpp",
+  assert.deepEqual(result.coverage.find((item) => item.id === "rust.format:.")?.checkedFiles, [
+    "src/main.rs",
   ]);
-  assert.equal(
-    result.coverage.every((item) => item.evidence === "explicit-inputs"),
-    true,
+  const lint = result.coverage.find((item) => item.id === "rust.lint:.");
+  assert.deepEqual(lint?.checkedFiles, []);
+  assert.equal(lint?.evidence, "process-exit");
+  assert.equal(lint?.status, "pass");
+});
+
+await test("a registry adapter named python runs alongside the python tool checks and validates its options", async (t) => {
+  const pythonAdapter = {
+    id: "python",
+    files: ["**/*.py"],
+    capabilities: ["syntax"],
+    rules: [
+      {
+        id: "python/syntax",
+        description: "Python syntax is valid",
+        remedy: "Correct source syntax",
+      },
+    ],
+    optionsSchema: {
+      type: "object",
+      properties: { level: { enum: ["strict"] } },
+      required: ["level"],
+      additionalProperties: false,
+    },
+  };
+  const { ctx, registry, script } = fixture(
+    t,
+    { "main.py": "print('ok')\n" },
+    { projects: [{ root: ".", profile: "python", options: { level: "strict" } }] },
+  );
+  const approved = registry("", pythonAdapter);
+  const planned = planAdapters(ctx, { registry: approved });
+  assert.deepEqual(planned.diagnostics, []);
+  assert.ok(planned.checks.some((item) => item.id === "python.syntax:."));
+  assert.ok(planned.checks.some((item) => item.id === "python.types:."));
+  // the external adapter's own process runs for real; the python tools are faked
+  const execute: Execute = (command, options) =>
+    command.includes(script)
+      ? run(command, options)
+      : Promise.resolve({
+          code: 0,
+          stdout: command.at(-1) === "--version" ? "1.0.0" : "",
+          stderr: "",
+        });
+  const result = await runAdapters(ctx, planned, { registry: approved, execute });
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(result.coverage.find((item) => item.id === "python.syntax:.")?.status, "pass");
+  assert.equal(result.coverage.find((item) => item.id === "python.lint:.")?.status, "pass");
+  // options the adapter schema does not accept are refused
+  const invalid = fixture(
+    t,
+    { "main.py": "print('ok')\n" },
+    { projects: [{ root: ".", profile: "python", options: { level: "lax" } }] },
+  );
+  const refused = planAdapters(invalid.ctx, { registry: invalid.registry("", pythonAdapter) });
+  assert.ok(refused.diagnostics.some((item) => item.rule === "projects.scope"));
+  // without the adapter, a built-in python project takes no options
+  const bare = fixture(
+    t,
+    { "main.py": "print('ok')\n" },
+    { projects: [{ root: ".", profile: "python", options: { level: "strict" } }] },
+  );
+  assert.ok(
+    planAdapters(bare.ctx).diagnostics.some((item) =>
+      /do not accept external adapter options/.test(item.message),
+    ),
   );
 });
 

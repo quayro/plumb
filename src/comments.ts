@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { posix } from "node:path";
 
 import { hashComments } from "./comment-hash.ts";
+import { pythonComments } from "./comment-python.ts";
 import { slashComments } from "./comment-slash.ts";
 import type { Config } from "./config.ts";
 import type { Rule } from "./diagnostics.ts";
@@ -24,7 +25,7 @@ export interface CommentFinding {
 const COMMENT_CHARS_MAX = 100;
 
 const DIRECTIVES =
-  /^(?:eslint(?:\s|[-/])|globals?\b|exported\b|(?:istanbul|c8|v8)\s+ignore\b|prettier-ignore\b|@(?:ts-|jsx|license|preserve)|[#@]\s*source(?:Mapping)?URL=|[#@]__PURE__|\/\s*<reference\b|rubocop:|NOLINT|clang-format\s+(?:on|off)|frozen_string_literal:|-\*-|syntax=|escape=)/; // tool directives speak to a tool, not a reader
+  /^(?:eslint(?:\s|[-/])|globals?\b|exported\b|(?:istanbul|c8|v8)\s+ignore\b|prettier-ignore\b|@(?:ts-|jsx|license|preserve)|[#@]\s*source(?:Mapping)?URL=|[#@]__PURE__|\/\s*<reference\b|-\*-|syntax=|escape=)/; // tool directives speak to a tool, not a reader
 
 const DECORATION = /^[-=*_~#\s]{3,}$|^[-=*_~#]{3,}\s*\S[^\n]*[-=*_~#]{3,}$/; // a rule of dashes, or a title fenced by them
 
@@ -38,8 +39,6 @@ const CODE: Record<string, RegExp> = {
     /^\w+\s+(?:String|Int|Float|Boolean|DateTime|Json|Bytes|Decimal)(?:\?|\[\])?(?:\s+@[^\n]+)?$/,
   jsonc: /^"(?:\\.|[^"\\])+"\s*:\s*[^\n]+[,}]$/,
   css: /^(?:--)?[a-z][a-z0-9-]*\s*:\s*[^;{}]+;$|^[^{}]+\{[^{}]*\}$/,
-  ruby: /^(?:def\s+\w+|end|(?:puts|require|return|raise)\s+\S[^\n]*|[a-z_]\w*\s*=\s*\S[^\n]*)$/,
-  cpp: /^(?:(?:return|throw)\s+\S[^\n]*|(?:auto|int|bool|char|double|float|void|std::\w+(?:<[^>]*>)?)\s+[\w:*&]+\s*(?:=|\()[^\n]*)[;{]$/,
 }; // a comment that is code, which the history keeps better than a comment does
 
 export const commentMessages = {
@@ -123,7 +122,7 @@ export const RULES: Rule[] = [
   },
 ];
 const SUPPRESSION =
-  /\b(?:NOLINT(?:NEXTLINE|BEGIN|END)?\b|rubocop:\s*(?:(?:disable|todo)\b|push\b[^\r\n]*\s-[A-Za-z])|clang-format\s+off\b|shellcheck\s+disable\s*=|shfmt:?\s+(?:off|skip|ignore)\b|prettier-ignore(?:\b|-))/i;
+  /\b(?:shellcheck\s+disable\s*=|shfmt:?\s+(?:off|skip|ignore)\b|prettier-ignore(?:\b|-))/i;
 
 export function commentsLanguageOf(path: string): string | undefined {
   const name = posix.basename(path);
@@ -131,7 +130,7 @@ export function commentsLanguageOf(path: string): string | undefined {
   if ([".prisma", ".sql", ".jsonc", ".css"].includes(extension)) {
     return extension.slice(1);
   }
-  if ([".yml", ".yaml"].includes(extension) || [".clang-format", ".clang-tidy"].includes(name)) {
+  if ([".yml", ".yaml"].includes(extension)) {
     return "yaml";
   }
   if (/^\.env(?:\.(?:schema|example))?$/.test(name)) {
@@ -143,19 +142,20 @@ export function commentsLanguageOf(path: string): string | undefined {
   if (extension === ".sh") {
     return "shell";
   }
-  if ([".rb", ".rake", ".gemspec"].includes(extension) || ["Gemfile", "Rakefile"].includes(name)) {
-    return "ruby";
+  if ([".py", ".pyi"].includes(extension)) {
+    return "python";
   }
-  if ([".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"].includes(extension)) {
-    return "cpp";
+  if (extension === ".rs") {
+    return "rust";
   }
   return undefined; // JavaScript comments are checked from its parser's tokens in the optional pack.
 }
 
 // a tool's own directive, written as the first words of a comment; a bare word elsewhere in prose
 // is not one
+// Python's forms follow the adapter's directive list, so a comment is refused the same way in both
 const TOOL_SUPPRESSION =
-  /^\s*(?:biome-ignore|stylelint-disable|markdownlint-disable|cspell:\s*(?:disable|ignore)|hadolint\s+(?:global\s+)?ignore|yamllint\s+disable|sqlfluff[:\s]+noqa|nolint\b|eslint-disable|pragma:\s*no\s+cover|nosec\b|pylint:\s*disable|pyright:\s*ignore|(?:istanbul|c8|v8)\s+ignore\b|@formatter:off|editorconfig-checker-disable|checkov:\s*skip|tflint-ignore|gitleaks:\s*allow)/i;
+  /^\s*(?:biome-ignore|stylelint-disable|markdownlint-disable|cspell:\s*(?:disable|ignore)|hadolint\s+(?:global\s+)?ignore|yamllint\s+disable|sqlfluff[:\s]+noqa|nolint\b|eslint-disable|(?:ruff|flake8)\s*:\s*noqa\b|noqa\b|type\s*:\s*ignore\b|fmt\s*:\s*(?:off|skip)\b|yapf\s*:\s*disable\b|isort\s*:\s*(?:off|skip(?:_file)?)\b|autopep8\s*:\s*off\b|black\s*:\s*skip\b|pylint\s*:\s*(?:disable(?:-next)?|skip-file)\b|pragma\s*:\s*no\s*cover\b|nosec\b|pyright\s*:\s*ignore\b|mypy\s*:\s*ignore-errors\b|(?:istanbul|c8|v8)\s+ignore\b|@formatter:off|editorconfig-checker-disable|checkov:\s*skip|tflint-ignore|gitleaks:\s*allow)/i;
 const TASK = /\b(?:TODO|FIXME|XXX|HACK)\b/g; // case-sensitive: lowercase prose is not a task marker
 
 export function commentsFind(
@@ -164,9 +164,12 @@ export function commentsFind(
   { tasks, markers = true }: { tasks?: string; markers?: boolean } = {},
 ): CommentFinding[] {
   const lineOf = (index: number): number => source.slice(0, index).split("\n").length;
-  const { found, issues } = ["shell", "yaml", "env", "docker", "ruby"].includes(language)
-    ? hashComments(source, language)
-    : slashComments(source, language);
+  const { found, issues } =
+    language === "python"
+      ? pythonComments(source)
+      : ["shell", "yaml", "env", "docker"].includes(language)
+        ? hashComments(source, language)
+        : slashComments(source, language);
   const task = (text: string, line: number): CommentFinding[] =>
     markers
       ? [...text.matchAll(TASK)]
@@ -238,7 +241,7 @@ export function checkComments({
       (config.projects ?? []).some(
         (project) =>
           project.profile === language &&
-          (language === "ruby" || language === "cpp") &&
+          (language === "python" || language === "rust") &&
           isWithin(project.root, path),
       );
     return language && governed

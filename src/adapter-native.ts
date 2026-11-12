@@ -1,7 +1,7 @@
 import { accessSync, constants, realpathSync } from "node:fs";
 import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 
-import { issue, projectFiles, same, statusOf } from "./adapter-plan.ts";
+import { issue, projectFiles, statusOf } from "./adapter-plan.ts";
 import { externalFile, fileHash } from "./adapter-registry.ts";
 import type { Project } from "./config.ts";
 import type { Context } from "./context.ts";
@@ -19,7 +19,7 @@ import {
 } from "./process.ts";
 import { at, isArray } from "./schema.ts";
 
-// RuboCop, clang-format and clang-tidy runs, with their launchers pinned for the run
+// ruff, mypy, rustfmt and clippy runs, with their launchers pinned for the run
 
 export interface CoverageRecord {
   id: string;
@@ -58,66 +58,63 @@ function relativeOutput(ctx: NativeContext, cwd: string | undefined, path: unkno
 const position = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 
-function rubocop(
-  ctx: NativeContext,
-  step: Step,
-  result: RunResult,
-): { diagnostics: Diagnostic[]; coverage: CoverageRecord } {
-  const payload: unknown = JSON.parse(result.stdout),
-    files = at(payload, "files"),
-    errors = at(payload, "errors"),
-    diagnostics: Diagnostic[] = [],
-    checkedFiles: string[] = [],
-    expected = step.files ?? [];
-  if (
-    !isArray(files) ||
-    at(payload, "summary", "inspected_file_count") !== files.length ||
-    (Array.isArray(errors) && errors.length > 0)
-  ) {
-    throw new Error("RuboCop did not report a complete file inspection");
+// cargo fmt formats what the package's module tree reaches, so a selected file it never names was
+// not checked: an orphan module is incomplete coverage, not a pass.
+function rustfmt(ctx: NativeContext, step: Step, result: RunResult): string[] {
+  return [...result.stdout.matchAll(/^Formatting (.+)$/gm)].map(([, path = ""]) =>
+    normalize(relative(ctx.root, resolve(step.cwd ?? ctx.root, path)).replaceAll("\\", "/")),
+  );
+}
+
+// clippy exits 101 for a denied lint and for a build it could not start alike; the JSON messages
+// tell them apart.
+function clippy(ctx: NativeContext, step: Step, result: RunResult): Diagnostic[] {
+  const messages = result.stdout
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .map((line): unknown => JSON.parse(line));
+  const finished = messages.find((message) => at(message, "reason") === "build-finished"),
+    diagnostics = new Map<string, Diagnostic>();
+  if (!finished) {
+    throw new Error(`cargo clippy did not finish the build:\n${result.stderr.trim()}`);
   }
-  for (const file of files) {
-    const path = relativeOutput(ctx, step.cwd, at(file, "path")),
-      offenses = at(file, "offenses");
-    checkedFiles.push(path);
-    if (!expected.includes(path) || !isArray(offenses)) {
-      throw new Error("RuboCop reported unexpected files or malformed offenses");
+  for (const message of messages) {
+    const spans = at(message, "message", "spans"),
+      span = isArray(spans) ? spans.find((item) => at(item, "is_primary") === true) : undefined,
+      text = at(message, "message", "message"),
+      code = at(message, "message", "code", "code");
+    if (
+      at(message, "reason") !== "compiler-message" ||
+      at(message, "message", "level") !== "error" ||
+      !span ||
+      typeof text !== "string"
+    ) {
+      continue;
     }
-    for (const offense of offenses) {
-      const message = at(offense, "message"),
-        cop = at(offense, "cop_name");
-      if (typeof message !== "string" || typeof cop !== "string") {
-        throw new Error("RuboCop returned a malformed offense");
-      }
-      const line = position(
-          at(offense, "location", "start_line") ?? at(offense, "location", "line"),
-        ),
-        column = position(
-          at(offense, "location", "start_column") ?? at(offense, "location", "column"),
-        );
-      diagnostics.push({
-        rule: "ruby.lint",
-        path,
-        message: `${cop}: ${message}`,
-        remedy: "Resolve the Ruby source diagnostic.",
-        suppressible: false,
-        check: step.id,
-        ...(line ? { line } : {}),
-        ...(column ? { column } : {}),
-      });
-    }
+    const path = relativeOutput(ctx, step.cwd, at(span, "file_name")),
+      line = position(at(span, "line_start")),
+      column = position(at(span, "column_start"));
+    // a file compiled into several targets reports each finding once per target
+    diagnostics.set(`${path}:${line}:${column}:${text}`, {
+      rule: "rust.lint",
+      path,
+      message: typeof code === "string" ? `${code}: ${text}` : text,
+      remedy: "Resolve the Rust compiler or clippy diagnostic.",
+      suppressible: false,
+      check: step.id,
+      ...(line ? { line } : {}),
+      ...(column ? { column } : {}),
+    });
   }
   if (
-    !same(checkedFiles, expected) ||
-    new Set(checkedFiles).size !== checkedFiles.length ||
-    (result.code === 1 && !diagnostics.length)
+    (at(finished, "success") === true) !== (result.code === 0) ||
+    (result.code !== 0) !== diagnostics.size > 0
   ) {
-    throw new Error("RuboCop's reported coverage or exit status is incomplete");
+    throw new Error(
+      `cargo clippy's exit status and diagnostics disagree:\n${result.stderr.trim()}`,
+    );
   }
-  return {
-    diagnostics,
-    coverage: { id: step.id ?? "", checkedFiles, status: statusOf(diagnostics) },
-  };
+  return [...diagnostics.values()];
 }
 
 function launcher(
@@ -165,6 +162,7 @@ export async function nativeRun(
     steps = nativeSteps({
       ...ctx,
       files: projectFiles(ctx, project),
+      inventory: ctx.files,
       config: { ...ctx.config, projects: [project] },
     });
   } catch (error) {
@@ -178,14 +176,15 @@ export async function nativeRun(
   for (const step of steps) {
     const id = step.id ?? "";
     try {
-      let pinned: { path: string; sha256: string } | undefined;
+      let pinned: { command: string; path: string; sha256: string } | undefined;
       const versionCommand = step.versionCommand ?? [];
       if (execute === run) {
         const identity = launcher(step.command[0] ?? "", ctx.root);
         identities.push({ check: id, ...identity });
         pinned = identity;
-        step.command[0] = identity.path;
-        versionCommand[0] = identity.path;
+        // run the name found on PATH, not its target: rustup's cargo is a link that acts by its name
+        step.command[0] = identity.command;
+        versionCommand[0] = identity.command;
       } else {
         identities.push({ check: id, source: "injected" });
       }
@@ -223,20 +222,39 @@ export async function nativeRun(
         });
         Object.assign(versions, result.versions);
         const finished = !!actual && !actual.error && (actual.code === 0 || actual.code === 1);
-        if (actual && finished && project.profile === "ruby") {
-          const parsed = rubocop(ctx, step, actual);
-          diagnostics.push(...parsed.diagnostics);
-          coverage.push(parsed.coverage);
+        if (actual && !actual.error && actual.code !== null && step.rule === "rust.lint") {
+          const found = clippy(ctx, step, actual);
+          diagnostics.push(...found);
+          coverage.push({ id, checkedFiles: [], status: statusOf(found) });
         } else {
+          const selected = step.files ?? [],
+            reached =
+              actual && finished && step.rule === "rust.format"
+                ? rustfmt(ctx, step, actual)
+                : selected,
+            missing = finished ? selected.filter((file) => !reached.includes(file)) : [];
           diagnostics.push(...result.diagnostics.map((item) => ({ ...item, check: id })));
+          if (missing.length) {
+            diagnostics.push(
+              issue(
+                "native.scope",
+                project.root,
+                `rustfmt did not reach ${missing.join(", ")}; declare each file as a module of a package target or exclude it with a reason`,
+                id,
+              ),
+            );
+          }
           coverage.push({
             id,
-            checkedFiles: finished ? (step.files ?? []) : [],
-            status: result.checks[0]?.status ?? "incomplete",
+            checkedFiles: finished ? selected.filter((file) => reached.includes(file)) : [],
+            status: missing.length ? "incomplete" : (result.checks[0]?.status ?? "incomplete"),
           });
         }
       }
-      if (pinned && fileHash(pinned.path) !== pinned.sha256) {
+      if (
+        pinned &&
+        (realpathSync(pinned.command) !== pinned.path || fileHash(pinned.path) !== pinned.sha256)
+      ) {
         throw new Error(`Tool launcher changed while checking: ${pinned.path}`);
       }
     } catch (error) {

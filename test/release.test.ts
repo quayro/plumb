@@ -7,82 +7,64 @@ import test from "node:test";
 import { syncAssets } from "../src/assets.ts";
 import { definePlumb } from "../src/config.ts";
 import { checkRepository } from "../src/engine.ts";
-import { at } from "../src/schema.ts";
 
 type Write = (path: string, content: string) => void;
 
-async function fixture(
-  verify: (root: string, write: Write, database: string) => Promise<void>,
-): Promise<void> {
+async function fixture(verify: (root: string, write: Write) => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(process.env.PLUMB_TEST_TMP ?? tmpdir(), "plumb-release-test-"));
   const config = definePlumb({
     schemaVersion: 1,
     preset: "portable",
-    projects: [{ root: ".", profile: "cpp", compileCommands: "build" }],
+    projects: [{ root: ".", profile: "python" }],
   });
   const write: Write = (path, content) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), content);
   };
-  const database = JSON.stringify([
-    { directory: root, file: "src/main.cpp", arguments: ["c++", "-c", "src/main.cpp"] },
-  ]);
   try {
     write("plumb.json", JSON.stringify(config));
-    write("src/main.cpp", "int main() { return 0; }\n");
-    write("build/compile_commands.json", database);
+    write("src/main.py", "x = 1\n");
     assert.deepEqual(syncAssets({ root, config }).diagnostics, []);
-    await verify(root, write, database);
+    await verify(root, write);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 }
 
-// these tests inject native process results to exercise core integrity, not Clang behavior.
+// these tests inject tool results to exercise core integrity, not ruff or mypy behavior.
 const successful =
   (action: (command: readonly string[]) => void = () => {}) =>
   async (command: readonly string[]): Promise<{ code: number; stdout: string; stderr: string }> => {
     if (command.at(-1) === "--version") {
-      return { code: 0, stdout: "18.1.8", stderr: "" };
+      return { code: 0, stdout: "1.0.0", stderr: "" };
     }
     action(command);
     return { code: 0, stdout: "", stderr: "" };
   };
 
-await test("ignored compilation metadata contributes to identity and cannot mutate during a check", async () => {
-  await fixture(async (root: string, write: Write, database: string) => {
-    const first = await checkRepository({ root, execute: successful() });
-    assert.equal(first.status, "pass", JSON.stringify(first.diagnostics));
-    write("build/compile_commands.json", `${database}\n`);
-    const second = await checkRepository({ root, execute: successful() });
-    assert.equal(second.status, "pass", JSON.stringify(second.diagnostics));
-    assert.notEqual(at(first.identity, "snapshot"), at(second.identity, "snapshot"));
+await test("a clean python check passes with the synced tool policies", async () => {
+  await fixture(async (root) => {
+    const result = await checkRepository({ root, execute: successful() });
+    assert.equal(result.status, "pass", JSON.stringify(result.diagnostics));
+  });
+});
+
+await test("existing tool policies cannot mutate during native execution", async () => {
+  await fixture(async (root, write) => {
     const changed = await checkRepository({
       root,
-      execute: successful(() => write("build/compile_commands.json", database)),
+      execute: successful(() => write("ruff.toml", "line-length = 200\n")),
     });
     assert.equal(changed.status, "incomplete");
     assert.ok(changed.diagnostics.some(({ rule }) => rule === "run.mutated"));
   });
 });
 
-await test("existing ignored formatting controls cannot mutate during native execution", async () => {
-  await fixture(async (root: string, write: Write) => {
-    write("src/.clang-format-ignore", "# no exclusions\n");
+await test("a newly created nested tool policy cannot turn an incomplete check into a pass", async () => {
+  await fixture(async (root, write) => {
     const changed = await checkRepository({
       root,
-      execute: successful(() => write("src/.clang-format-ignore", "*\n")),
-    });
-    assert.equal(changed.status, "incomplete");
-    assert.ok(changed.diagnostics.some(({ rule }) => rule === "run.mutated"));
-  });
-});
-
-await test("a newly created ignored formatting control cannot turn an incomplete check into a pass", async () => {
-  await fixture(async (root: string, write: Write) => {
-    const changed = await checkRepository({
-      root,
-      execute: successful(() => write("src/.clang-format-ignore", "*\n")),
+      execute: successful(() => write("src/ruff.toml", '[lint]\nignore = ["ALL"]\n')),
     });
     assert.equal(changed.status, "incomplete");
     assert.ok(changed.diagnostics.some(({ rule }) => ["run.mutated", "run.failed"].includes(rule)));

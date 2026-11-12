@@ -12,15 +12,15 @@ This file is the entry point for work on Plumb itself. Plumb checks itself with 
 
 ## Commands
 
-| Command                      | What it does                                     |
-| ---------------------------- | ------------------------------------------------ |
-| `npm test`                   | Core, JavaScript-pack, Python and adapter suites |
-| `npm run test:native`        | Real RuboCop, clang-format and clang-tidy checks |
-| `npm run check`              | Plumb's own policy                               |
-| `npm run fix`                | Write formatting and generated regions           |
-| `node scripts/schema.ts`     | Regenerate `plumb.schema.json` from the schema   |
-| `node scripts/plumb.ts sync` | Rewrite generated hooks and CODEOWNERS           |
-| `npm run hooks:install`      | Point git at the hooks; installing already does  |
+| Command                      | What it does                                      |
+| ---------------------------- | ------------------------------------------------- |
+| `npm test`                   | Core, JavaScript-pack, Python and adapter suites  |
+| `npm run test:native`        | Real ruff, mypy, rustfmt, clippy and rustc checks |
+| `npm run check`              | Plumb's own policy                                |
+| `npm run fix`                | Write formatting and generated regions            |
+| `node scripts/schema.ts`     | Regenerate `plumb.schema.json` from the schema    |
+| `node scripts/plumb.ts sync` | Rewrite generated hooks and CODEOWNERS            |
+| `npm run hooks:install`      | Point git at the hooks; installing already does   |
 
 The `node scripts/plumb.ts` wrapper pins the Python adapter from git, not the working tree: `PLUMB_ADAPTER_REF` (default `HEAD`) names the revision. Commit an adapter change before the self-check uses it.
 

@@ -10,7 +10,7 @@ Plumb is vendored into many repositories and must run before their dependencies 
 
 ## Decision
 
-The core in `src/` and `bin/` imports only `node:` built-ins. Engines with dependencies — ESLint, TypeScript, Prettier, Knip, Python, RuboCop, clang — live in packs or adapters with pinned versions, and a missing engine is reported as incomplete.
+The core in `src/` and `bin/` imports only `node:` built-ins. Engines with dependencies — ESLint, TypeScript, Prettier, Knip, Python, ruff, mypy, cargo — live in packs or adapters with pinned versions, and a missing engine is reported as incomplete.
 
 ## Consequences
 

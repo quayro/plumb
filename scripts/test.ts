@@ -30,7 +30,7 @@ if (mode === "all") {
         : mode === "python"
           ? ["packages/python/test"]
           : mode === "adapters"
-            ? ["packages/sdk/test", "packages/go/test"]
+            ? ["packages/sdk/test", "packages/rust/test"]
             : ["packages/javascript/test"];
   const files = folders.flatMap((folder) =>
     readdirSync(join(root, folder))

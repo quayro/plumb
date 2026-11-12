@@ -6,6 +6,6 @@
 - [Configuration schema](../../plumb.schema.json) — the JSON Schema for `plumb.json`.
 - [Adapter protocol schema](../../adapter-protocol.schema.json) — the registry, request and response of adapter protocol version 1.
 - [JavaScript pack](../../packages/javascript/README.md) — ESLint, TypeScript, Prettier and Knip options.
-- [Python adapter](../../packages/python/README.md) — the dependency-free Python checks.
-- [Go adapter](../../packages/go/README.md) — tokenizer-based Go source policy.
-- [Adapter SDK](../../packages/sdk/README.md) — the one-file library for writing an adapter.
+- [Python adapter](../../packages/python/README.md) — the dependency-free Python source policy.
+- [Rust adapter](../../packages/rust/README.md) — tokenizer-based Rust source policy.
+- [Adapter SDK](../../packages/sdk/README.md) — the one-file library for writing an adapter in TypeScript, Python or Rust.
