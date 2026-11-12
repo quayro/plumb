@@ -31,6 +31,7 @@ import { canonical, digest, snapshot } from "./files.ts";
 import * as formatTools from "./format-tools.ts";
 import * as formatting from "./formatting.ts";
 import * as hooks from "./hooks.ts";
+import { NATIVE } from "./native.ts";
 import { applyExceptions } from "./policy.ts";
 import * as policyTests from "./policy-tests.ts";
 import { versionOf } from "./process.ts";
@@ -189,7 +190,7 @@ export async function checkContext(options: EngineOptions): Promise<Report> {
   if (!adapters.needsJavascript(ctx.config)) {
     checks.push({ id: "javascript", status: "not-applicable" });
   }
-  if (!ctx.config.projects.some((project) => ["ruby", "cpp"].includes(project.profile))) {
+  if (!ctx.config.projects.some((project) => NATIVE.includes(project.profile))) {
     checks.push({ id: "native", status: "not-applicable" });
   }
   const behavioral = await verification.verifySuites(ctx, {

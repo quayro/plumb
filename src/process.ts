@@ -136,7 +136,7 @@ export function run(
   });
 }
 
-// "3.10.0", "v3.10.0" or "clang-format version 18.1.8" all name the same kind of release
+// "3.10.0", "v3.10.0" or "rustfmt 1.8.0-stable" all name the same kind of release
 export const versionOf = (text: string): string =>
   text.match(/(?<![\w.])v?(\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?)\b/i)?.[1] ?? text;
 

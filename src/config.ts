@@ -37,7 +37,6 @@ const project = object(
     ),
     uniqueExports: array(path, 1),
     javascript: { type: "object" },
-    compileCommands: path,
     prepare: array(array(text, 1), 1),
   },
   ["root", "profile"],
@@ -320,9 +319,6 @@ export function definePlumb(input: unknown): Config {
       throw new TypeError(`Duplicate project ${key}`);
     }
     roots.add(key);
-    if (project.profile === "cpp" && !project.compileCommands) {
-      throw new TypeError(`projects ${project.root}: cpp requires compileCommands`);
-    }
     if (
       !["typescript", "react"].includes(project.profile) &&
       ["tsconfigs", "knip", "surface", "uniqueExports", "javascript"].some((key) => key in project)

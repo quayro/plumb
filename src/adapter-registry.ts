@@ -231,7 +231,7 @@ export function loadAdapterRegistry(
     source = readFileSync(path, "utf8");
   const value: unknown = JSON.parse(source);
   validateSchema(value, registrySchema, "adapters");
-  const ids = new Set(["javascript", "typescript", "react", "ruby", "cpp", "native", "core"]),
+  const ids = new Set(["javascript", "typescript", "react", "native", "core"]),
     rules = new Set<string>();
   const adapters = value.adapters.map((entry): Adapter => {
     if (ids.has(entry.id)) {

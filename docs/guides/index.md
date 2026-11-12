@@ -9,6 +9,7 @@ Task-oriented instructions for each family of checks.
 - [Custom rules](custom-rules.md) — repository invariants declared in the policy: patterns, documented names and coupled changes.
 - [Tests and coverage](verification.md) — required suites, fresh reports and a minimum line coverage.
 - [Documentation](documentation.md) — structure, headings, links, decision records and generated regions.
+- [Language profiles](languages.md) — what the typescript, python and rust profiles run, and their tools.
 - [Source hygiene](source-hygiene.md) — coverage, suppression comments and task markers.
 - [Aligned formatting](formatting.md) — tables, key columns, JSON key order and pinned formatters.
 - [CI and branch protection](ci.md) — the required workflow and repository settings.

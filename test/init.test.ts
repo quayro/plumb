@@ -33,17 +33,22 @@ await test("init detects the languages a repository already uses", async () => {
     [{ "src/a.ts": "" }, [{ root: ".", profile: "typescript" }], []],
     [{ "src/a.tsx": "", "b.ts": "" }, [{ root: ".", profile: "react" }], []],
     [
-      { "lib/a.rb": "", "tool.py": "", "main.go": "" },
-      [{ root: ".", profile: "ruby" }],
-      ["python", "go"],
+      { "src/lib.rs": "", "tool.py": "" },
+      [
+        { root: ".", profile: "python" },
+        { root: ".", profile: "rust" },
+      ],
+      [],
     ],
+    // a removed language is neither configured nor reported as an external profile
+    [{ "lib/a.rb": "", "main.go": "" }, [], []],
   ];
   for (const [files, projects, external] of cases) {
     const root = directory(files),
       { code, result } = await run(root, "init");
     assert.equal(code, 0);
     assert.deepEqual(at(policyOf(root), "projects"), projects);
-    // a language without a built-in profile is reported, never silently configured
+    // a language without a built-in profile is never silently configured
     assert.deepEqual(at(result, "detected", "external"), external);
   }
   // an explicit profile wins over detection

@@ -1,83 +1,89 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join, posix, relative, resolve } from "node:path";
+import { devNull, tmpdir } from "node:os";
+import { join, posix, relative } from "node:path";
 
-import { CLANG_FORMAT } from "./assets.ts";
 import type { Config } from "./config.ts";
 import type { Rule } from "./diagnostics.ts";
-import { asError, errorCode } from "./errors.ts";
 import { isWithin, normalize, safePath } from "./files.ts";
 import type { Step } from "./process.ts";
-import { at, isArray } from "./schema.ts";
-
-interface CompileCommand {
-  directory: string;
-  file: string;
-}
 
 export const RULES: Rule[] = [
   {
     id: "native.scope",
-    description: "Native projects select source files and required build metadata.",
-    remedy: "Correct the project scope and generate its compilation database.",
+    description: "Native projects select source files and their package manifest.",
+    remedy: "Correct the project scope, or add the manifest and declare every source in it.",
     suppressible: false,
   },
   {
-    id: "ruby.lint",
-    description: "Ruby passes the pinned RuboCop policy.",
-    remedy: "Resolve RuboCop's diagnostics.",
+    id: "python.format",
+    description: "Python passes the pinned ruff format policy.",
+    remedy: "Run plumb fix.",
     suppressible: false,
   },
   {
-    id: "cpp.format",
-    description: "C/C++ passes the pinned clang-format policy.",
-    remedy: "Run plumb fix, then resolve remaining include-order or brace findings manually.",
+    id: "python.lint",
+    description: "Python passes every ruff rule of the pinned policy.",
+    remedy: "Resolve ruff's diagnostics.",
     suppressible: false,
   },
   {
-    id: "cpp.lint",
-    description: "C/C++ passes clang-tidy with warnings as errors.",
-    remedy: "Resolve clang-tidy's diagnostics.",
+    id: "python.types",
+    description: "Python passes mypy in strict mode.",
+    remedy: "Resolve mypy's diagnostics.",
+    suppressible: false,
+  },
+  {
+    id: "rust.format",
+    description: "Rust passes the pinned rustfmt policy.",
+    remedy: "Run plumb fix.",
+    suppressible: false,
+  },
+  {
+    id: "rust.lint",
+    description: "Rust compiles and passes clippy with warnings as errors.",
+    remedy: "Resolve the compiler and clippy diagnostics.",
     suppressible: false,
   },
 ];
 
-const CPP = /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx)$/;
-const RUBY = /\.(?:rb|rake|gemspec)$|(?:^|\/)(?:Gemfile|Rakefile)$/;
+const SOURCE: Record<string, RegExp> = { python: /\.pyi?$/, rust: /\.rs$/ };
+
+// the profiles whose toolchains the core runs itself
+export const NATIVE = Object.keys(SOURCE);
 
 export const nativeSource = (profile: string, path: string): boolean =>
-  (profile === "ruby" ? RUBY : profile === "cpp" ? CPP : undefined)?.test(path) ?? false;
+  SOURCE[profile]?.test(path) ?? false;
 
-type Read = (path: string, options?: { allowMissing?: boolean }) => string | null;
-
-function checkFormatIgnores(folder: string, sources: readonly string[], read: Read): void {
-  const directories = new Set([folder]);
-  for (const source of sources) {
-    for (
-      let directory = posix.dirname(source);
-      isWithin(folder, directory);
-      directory = posix.dirname(directory)
-    ) {
-      directories.add(directory);
-      if (directory === folder) {
-        break;
-      }
+// cargo applies a manifest's lints table and a config's rustflags after clippy's own -D warnings, so
+// an allow level or a lint cap there turns a finding into a pass; a warn level is still denied.
+// the raw text is searched, comments included: a refusal that is too eager is incomplete, one that
+// is fooled is a false pass.
+function lintLevels(root: string, folder: string, files: readonly string[]): void {
+  const text = (path: string): string => readFileSync(safePath(root, path), "utf8");
+  for (const manifest of files.filter(
+    (path) => isWithin(folder, path) && posix.basename(path) === "Cargo.toml",
+  )) {
+    if (/\blints\b/.test(text(manifest)) && /["']allow["']/.test(text(manifest))) {
+      throw new Error(
+        `${manifest}: a lints table that allows a lint switches clippy findings off; remove the allow level`,
+      );
     }
   }
-  for (const directory of directories) {
-    const path = posix.join(directory, ".clang-format-ignore");
-    const content = read(path, { allowMissing: true });
-    if (content === null) {
-      if (directory === folder) {
+  for (let directory = folder; ; directory = posix.dirname(directory)) {
+    for (const name of [".cargo/config.toml", ".cargo/config"]) {
+      const config = posix.join(directory, name);
+      if (
+        existsSync(join(root, config)) &&
+        /(?<![\w-])(?:-A|--allow|--cap-lints)/.test(text(config))
+      ) {
         throw new Error(
-          `${path}: run plumb sync to isolate formatting from inherited ignore files`,
+          `${config}: rustflags that allow or cap lints switch clippy findings off; remove them`,
         );
       }
-      continue;
     }
-    if (content.split(/\r?\n/).some((line) => line.trim() && !line.trimStart().startsWith("#"))) {
-      throw new Error(
-        `${path}: clang-format ignore patterns can hide selected source; declare reviewed exclusions in plumb.json instead`,
-      );
+    if (directory === ".") {
+      break;
     }
   }
 }
@@ -88,17 +94,14 @@ export function nativeSteps(
     root,
     files,
     config,
-    read = (path, { allowMissing = false } = {}) => {
-      try {
-        return readFileSync(safePath(root, path, { allowMissing }), "utf8");
-      } catch (error) {
-        if (allowMissing && errorCode(error) === "ENOENT") {
-          return null;
-        }
-        throw asError(error);
-      }
-    },
-  }: { root: string; files: readonly string[]; config: Pick<Config, "projects">; read?: Read },
+    // every selected file, where files may already be narrowed to one project's sources
+    inventory = files,
+  }: {
+    root: string;
+    files: readonly string[];
+    config: Pick<Config, "projects">;
+    inventory?: readonly string[];
+  },
   mode = "check",
 ): Step[] {
   const steps: Step[] = [];
@@ -108,7 +111,7 @@ export function nativeSteps(
     root: normalize(project.root),
   }));
   for (const project of projects) {
-    if (!["ruby", "cpp"].includes(project.profile)) {
+    if (!NATIVE.includes(project.profile)) {
       continue;
     }
     const folder = project.root;
@@ -152,115 +155,110 @@ export function nativeSteps(
       fix,
       files: checkedFiles,
     });
-    if (project.profile === "ruby") {
-      const launch = process.platform === "win32" ? ["ruby", "-S"] : [];
-      const command = [
-        ...launch,
-        ...(existsSync(join(cwd, "Gemfile")) ? ["bundle", "exec", "rubocop"] : ["rubocop"]),
-      ];
+    if (project.profile === "python") {
+      // an explicit config file replaces every pyproject.toml and nested config ruff would discover
+      const policy = ["--config", join(cwd, "ruff.toml"), "--no-cache"];
+      steps.push(
+        step(
+          "format",
+          "ruff",
+          ["ruff", "format", ...(fix ? [] : ["--check"]), ...policy, "--", ...selected],
+          ["ruff", "--version"],
+        ),
+      );
+      if (fix) {
+        continue;
+      }
       steps.push(
         step(
           "lint",
-          "rubocop",
+          "ruff",
           [
-            ...command,
-            "--config",
-            join(cwd, ".rubocop.yml"),
-            "--cache",
-            "false",
-            "--format",
-            fix ? "simple" : "json",
-            ...(fix ? ["--autocorrect"] : []),
+            "ruff",
+            "check",
+            "--no-fix",
+            "--ignore-noqa",
+            "--output-format",
+            "concise",
+            ...policy,
             "--",
             ...selected,
           ],
-          [...command, "--version"],
+          ["ruff", "--version"],
+        ),
+        step(
+          "types",
+          "mypy",
+          [
+            "mypy",
+            "--config-file",
+            join(cwd, "mypy.ini"),
+            "--cache-dir",
+            devNull,
+            "--no-error-summary",
+            "--",
+            ...selected,
+          ],
+          ["mypy", "--version"],
         ),
       );
       continue;
     }
-    checkFormatIgnores(folder, sources, read);
-    const style = fix
-      ? JSON.stringify({
-          ...CLANG_FORMAT,
-          SortIncludes: "Never",
-          IncludeBlocks: "Preserve",
-          InsertBraces: false,
-        })
-      : `file:${join(cwd, ".clang-format")}`;
+    // shortcut: the project root must be the package or workspace root, because cargo reports
+    // paths relative to it; resolve the workspace with cargo metadata when a member is a project.
+    if (!existsSync(join(cwd, "Cargo.toml"))) {
+      throw new Error(
+        `${folder}: Cargo.toml is missing; a rust project is rooted at its package or workspace`,
+      );
+    }
+    lintLevels(root, folder, inventory);
     steps.push(
       step(
         "format",
-        "clang-format",
+        "rustfmt",
         [
-          "clang-format",
-          `--style=${style}`,
-          ...(fix ? ["-i"] : ["--dry-run", "--Werror"]),
+          "cargo",
+          "fmt",
+          ...(fix ? [] : ["--check"]),
           "--",
-          ...selected,
+          "--config-path",
+          join(cwd, "rustfmt.toml"),
+          "--color",
+          "never",
+          // each formatted file is named, which is the evidence of what was checked
+          ...(fix ? [] : ["--verbose"]),
         ],
-        ["clang-format", "--version"],
+        ["cargo", "fmt", "--version"],
       ),
     );
     if (fix) {
       continue;
     }
-    const units = selected.filter((path) => !/\.(?:h|hh|hpp|hxx)$/.test(path));
-    if (!units.length) {
-      throw new Error(
-        `${folder}: clang-tidy needs at least one C/C++ translation unit that includes the headers`,
-      );
-    }
-    const databasePath = project.compileCommands ?? (folder === "." ? "build" : `${folder}/build`);
-    const database = safePath(root, databasePath, { allowMissing: true });
-    const databaseFile = safePath(root, `${databasePath}/compile_commands.json`, {
-      allowMissing: true,
-    });
-    if (!existsSync(databaseFile)) {
-      throw new Error(
-        `${folder}: ${databasePath}/compile_commands.json is missing; generate the compilation database before checking`,
-      );
-    }
-    const commands: unknown = JSON.parse(read(`${databasePath}/compile_commands.json`) ?? "null");
-    const valid = (entry: unknown): entry is CompileCommand => {
-      const command = at(entry, "command"),
-        args = at(entry, "arguments");
-      return (
-        typeof at(entry, "directory") === "string" &&
-        typeof at(entry, "file") === "string" &&
-        ((typeof command === "string" && !!command.trim()) ||
-          (isArray(args) && args.length > 0 && args.every((value) => typeof value === "string")))
-      );
-    };
-    if (!Array.isArray(commands) || !commands.every(valid)) {
-      throw new Error(
-        `${folder}: compile_commands.json must contain compiler command objects with directory, file and command or arguments`,
-      );
-    }
-    const compiled = new Set(
-      commands.map((entry) => resolve(database, entry.directory, entry.file)),
-    );
-    const missing = units.filter((path) => !compiled.has(resolve(cwd, path)));
-    if (missing.length) {
-      throw new Error(
-        `${folder}: the compilation database has no compiler command for ${missing.join(", ")}; regenerate it before checking`,
-      );
-    }
     steps.push(
       step(
         "lint",
-        "clang-tidy",
+        "clippy",
         [
-          "clang-tidy",
-          "--config-file",
-          join(cwd, ".clang-tidy"),
-          "-p",
-          database,
-          "--quiet",
-          ...units,
+          "cargo",
+          "clippy",
+          // the lock file and the network stay untouched
+          "--frozen",
+          "--all-targets",
+          "--all-features",
+          // build output stays out of the checkout
+          "--target-dir",
+          join(
+            tmpdir(),
+            "plumb-cargo",
+            createHash("sha256").update(cwd).digest("hex").slice(0, 16),
+          ),
+          "--message-format=json",
+          "--",
+          "-D",
+          "warnings",
         ],
-        ["clang-tidy", "--version"],
-        sources.filter((file) => !/\.(?:h|hh|hpp|hxx)$/.test(file)),
+        ["cargo", "clippy", "--version"],
+        [],
       ),
     );
   }

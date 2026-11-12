@@ -190,23 +190,26 @@ await test("a complete violation or an incomplete check is never stored as reusa
 });
 
 await test("language and behavioral modes execute on every invocation with caching disabled", async (t) => {
-  const ruby = fixture(
+  const python = fixture(
     t,
-    { projects: [{ root: ".", profile: "ruby" }] },
-    { "source.rb": "puts 1\n" },
+    { projects: [{ root: ".", profile: "python" }] },
+    { "source.py": "x = 1\n" },
   );
   let calls = 0;
+  const seen: number[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const result = await ruby.check({
+    const result = await python.check({
       execute: async () => {
         calls++;
         return { error: "controlled missing tool", code: null, stdout: "", stderr: "" };
       },
     });
+    seen.push(calls);
     assert.equal(at(result.cache, "enabled"), false);
     assert.equal(result.exitCode, 2);
   }
-  assert.equal(calls, 2);
+  // every invocation probes the tools again: the second run adds calls rather than replaying the first
+  assert.ok(seen[0] > 0 && seen[1] > seen[0]);
   const behavioral = fixture(t, {
     verification: [
       {

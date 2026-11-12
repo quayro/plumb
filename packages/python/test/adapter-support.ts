@@ -13,6 +13,7 @@ import type { Context, ReadOptions } from "../../../src/context.ts";
 import { type Diagnostic, isDiagnostic } from "../../../src/diagnostics.ts";
 import { asError, errorCode } from "../../../src/errors.ts";
 import { digest, safePath } from "../../../src/files.ts";
+import { type Execute, run as runCommand } from "../../../src/process.ts";
 import { at, isArray, isRecord } from "../../../src/schema.ts";
 import { mapped, parseJson, testContext } from "../../../test/support.ts";
 
@@ -99,6 +100,19 @@ interface PythonFixture {
   direct: (value?: unknown, extra?: { env?: NodeJS.ProcessEnv }) => Response;
   run: () => Promise<AdapterResult>;
 }
+
+// the python profile also runs ruff and mypy; these adapter tests answer those tool commands alone
+const toolVersions = new Map([
+  ["ruff", "ruff 0.17.4"],
+  ["mypy", "mypy 2.4.1"],
+]);
+
+export const execute: Execute = (command, options) => {
+  const version = toolVersions.get(command[0] ?? "");
+  return version === undefined
+    ? runCommand(command, options)
+    : Promise.resolve({ code: 0, stdout: `${version}\n`, stderr: "" });
+};
 
 export function fixture(
   t: TestContext,
@@ -194,6 +208,6 @@ export function fixture(
     assert.deepEqual(output.versions, at(manifest, "adapters", 0, "tools"));
     return output;
   };
-  const run = () => runAdapters(ctx, planAdapters(ctx, { registry }), { registry });
+  const run = () => runAdapters(ctx, planAdapters(ctx, { registry }), { registry, execute });
   return { root, tools, ctx, registry, registryFile, write, request, direct, run };
 }

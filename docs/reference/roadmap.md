@@ -13,15 +13,15 @@ Where each planned capability lives. Every row is implemented and tested in this
 | 7   | Versioned policies and reproducible execution                         | `schemaVersion`, bundle and input hashes, a checker identity in every report                  | [getting started](../getting-started/index.md#verify-the-checker)   |
 | 8   | Strengthen the policy ratchet against weakening                       | `check --base` classifies every pointer; new sections `rules` and `ci` only tighten           | [ratchet](../guides/policy-ratchet.md)                              |
 | 9   | Custom rule definitions and extensible schemas                        | `rules` in the policy; adapter `optionsSchema` for project options                            | [custom rules](../guides/custom-rules.md)                           |
-| 10  | Public adapter SDK                                                    | `packages/sdk/adapter.ts`                                                                     | [SDK](../../packages/sdk/README.md)                                 |
+| 10  | Public adapter SDK                                                    | `packages/sdk/adapter.{ts,py,rs}`                                                             | [SDK](../../packages/sdk/README.md)                                 |
 | 11  | Adapter capability declarations                                       | registry `files`, `capabilities`, `rules`, `tools`, `inputs`, `sandbox`                       | [adapters](../guides/adapters.md#capabilities)                      |
-| 12  | Additional languages and frameworks                                   | Go adapter beside TypeScript, React, Ruby, C++ and Python                                     | [Go adapter](../../packages/go/README.md)                           |
-| 13  | Integrate existing linters, formatters and analyzers                  | ESLint, TypeScript, Prettier, Knip, RuboCop, clang, pinned formatters                         | [compatibility](compatibility.md#languages)                         |
+| 12  | Additional languages and frameworks                                   | TypeScript, React, Python and Rust, each with tools and source policy                         | [Rust adapter](../../packages/rust/README.md)                       |
+| 13  | Integrate existing linters, formatters and analyzers                  | ESLint, TypeScript, Prettier, Knip, ruff, mypy, rustfmt, clippy, pinned formatters            | [compatibility](compatibility.md#languages)                         |
 | 14  | Declarative custom rules                                              | `forbid`, `require`, `mentionedIn`, `changesWith`                                             | [custom rules](../guides/custom-rules.md)                           |
 | 15  | AST-based and semantic analysis                                       | TypeScript Programs, Python `ast` with lexical scopes, convention node selectors              | [Python adapter](../../packages/python/README.md)                   |
 | 16  | Adapter compatibility and conformance tests                           | `plumb conformance`                                                                           | [adapters](../guides/adapters.md#conformance)                       |
 | 17  | Enforce architectural boundaries                                      | `contracts.boundaries`, `contracts.importGraphs`                                              | [JavaScript pack](../../packages/javascript/README.md)              |
-| 18  | Enforce dependency restrictions                                       | import graphs, Python and Go `forbiddenImports`                                               | [Go adapter](../../packages/go/README.md)                           |
+| 18  | Enforce dependency restrictions                                       | import graphs, Python and Rust `forbiddenImports`                                             | [Rust adapter](../../packages/rust/README.md)                       |
 | 19  | Validate relationships between files                                  | convention `companions`, manifests, registrations, `mentionedIn`                              | [custom rules](../guides/custom-rules.md)                           |
 | 20  | Enforce API compatibility contracts                                   | reviewed `.surface.json` snapshots                                                            | [JavaScript pack](../../packages/javascript/README.md)              |
 | 21  | Check documentation-to-code consistency                               | `mentionedIn` rules, generated regions, link and structure checks                             | [documentation](../guides/documentation.md)                         |
@@ -80,6 +80,7 @@ Where each planned capability lives. Every row is implemented and tested in this
 - A registry is a directory of files, public through the repository that holds it; there is no search service, and a pack is updated by replacing its pinned copy.
 - Installation is `plumb vendor` or a standalone build; the package is not published to a package registry.
 - The sandbox uses the operating system's own tool and is unavailable on Windows, where a sandboxed adapter is incomplete.
-- The Go adapter and custom rules read tokens and text, not types.
+- The Rust adapter and custom rules read tokens and text, not types.
+- A Rust project is rooted at its package or workspace; clippy answers for the project as cargo compiles it, not for each file.
 - Editor support is a Language Server Protocol server and a VS Code task; no editor extension is published.
 - The suites are not run on Windows in CI.

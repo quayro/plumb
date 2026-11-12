@@ -147,7 +147,7 @@ export const governedComments = (ctx: Pick<Context, "files" | "config">): string
         ctx.config.projects.some(
           (project) =>
             project.profile === language &&
-            (language === "ruby" || language === "cpp") &&
+            (language === "python" || language === "rust") &&
             isWithin(project.root, file),
         ))
     );

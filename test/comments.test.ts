@@ -16,16 +16,29 @@ await test("non-script comment wording, code, separators and tool directives ret
     [".env.example", "#\n"],
     ["Dockerfile", "# ---- build ----\n"],
     ["theme.css", "/* color: blue; */\n"],
-    ["thing.rb", "# Keep it short\n"],
+    ["thing.py", "# Keep it short\n"],
+    ["thing.rs", "// let total = 1;\n"],
   ];
   for (const [path, text] of failures) {
     assert.equal(problems(path, text).length, 1, path);
   }
+  assert.deepEqual(problems("thing.rs", "// Example: let x = 1;\n// TOTP stays verified\n"), []);
+  assert.deepEqual(problems("thing.py", "# -*- coding: utf-8 -*-\n"), []);
+});
+
+await test("removed languages have no comment scanner, so their files are never governed", () => {
+  for (const path of ["app.rb", "Gemfile", "main.cpp", "main.h", ".clang-format"]) {
+    assert.equal(commentsLanguageOf(path), undefined, path);
+  }
   assert.deepEqual(
-    problems("thing.cpp", "// clang-format on\n// Example: auto x = 1;\n// TOTP stays verified\n"),
+    checkComments({
+      root: ".",
+      files: ["app.rb", "main.cpp"],
+      config: policy({ preset: "portable" }),
+      read: () => "# NOLINT\n// TODO: later\n",
+    }),
     [],
   );
-  assert.deepEqual(problems("thing.rb", "# frozen_string_literal: true\n"), []);
 });
 
 await test("CSS single-quoted strings and URLs contain data rather than comments", () => {
@@ -44,40 +57,194 @@ await test("CSS single-quoted strings and URLs contain data rather than comments
   );
 });
 
-await test("C++ raw strings, digit separators, and spliced lines preserve real comment positions", () => {
-  const clean =
-    "auto a = R\"tag(\n// Capital\n/* Capital */\n)tag\";\nlong n = 1'000;\nchar c = '/';\n";
-  assert.deepEqual(problems("main.cpp", clean), []);
+await test("Python strings, bytes, and docstrings hide comment markers; real comments are found", () => {
   assert.deepEqual(
-    problems("main.cpp", clean + "// Capital\n").map(({ line, code }) => [line, code]),
-    [[7, "capital"]],
+    problems("tool.py", "# Capital\nx = 1  #Comment\n").map(({ line, code }) => [line, code]),
+    [
+      [1, "capital"],
+      [2, "spacing"],
+      [2, "capital"],
+    ],
   );
   assert.deepEqual(
-    problems("main.cpp", "int n = 0xAB'CD; // Capital\n").map(({ code }) => code),
-    ["capital"],
+    problems("tool.py", "#!/usr/bin/env python3\n# Capital\n").map(({ line }) => line),
+    [2],
   );
+  for (const source of [
+    "x = '# Capital'\ny = \"# Capital\"\n",
+    'def f():\n    """# Capital in a docstring"""\n    return 1\n',
+    "s = '''\n# Capital\n'''\n",
+    'value = """line one\n# Capital\nline three"""\n',
+    'a = r"# Capital"; b = b\'# Capital\'; c = rb"""# Capital"""\n',
+    'd = Rb"# Capital"; e = fR"# Capital"; f = u"# Capital"; g = t"# Capital"\n',
+    's = "a \\" # Capital"\n',
+    'r = r"\\" # Capital"\n',
+    "value = 'it\\'s # not a comment'\n",
+  ]) {
+    assert.deepEqual(problems("tool.py", source), [], source);
+  }
   assert.deepEqual(
-    problems("main.cpp", "/\\\n/ Capital\n").map(({ line, code }) => [line, code]),
-    [[1, "capital"]],
+    problems("tool.py", "x = 1\n# keep the remainder\n").map(({ code }) => code),
+    [],
   );
 });
 
-await test("Ruby multiline strings and inline hash comments are distinct", () => {
-  assert.deepEqual(problems("main.rb", 'value = "line one\n# Capital\nline three"\n'), []);
+await test("Python f-strings: literal # and nested fields are data; a # in a field expression is incomplete", () => {
+  const fstrings = [
+    'a = f"{x} # Capital"',
+    'b = f"{x:#x}"',
+    "c = f\"{d['#']}\"",
+    'd = f"{{# Capital}}"',
+    "e = f\"{f'#{x}'}\"",
+    'g = f"{x!r:>{width}}"',
+    's = f"\\N{DASH} # Capital"',
+  ].join("\n");
+  assert.deepEqual(problems("tool.py", `${fstrings}\n`), []);
+  for (const source of ['f"{x # c}"\n', 'f"{x"\n']) {
+    assert.ok(
+      problems("tool.py", source).some(({ status }) => status === "incomplete"),
+      source,
+    );
+  }
   assert.deepEqual(
-    problems("main.rb", "n = 1#Comment\n").map(({ code }) => code),
-    ["spacing", "capital"],
+    problems("tool.py", 'x = f"""\n{y}\n"""  # Capital\n').map(({ line, code }) => [line, code]),
+    [[3, "capital"]],
+  );
+});
+
+await test("Python task markers and suppressions: markers inside strings are data, odd-spaced directives still fire", () => {
+  assert.deepEqual(
+    problems("a.py", "# TODO: fix\n").map(({ code }) => code),
+    ["task"],
+  );
+  for (const source of [
+    'x = "TODO: later"\n',
+    'x = "TO" "DO: later"\n',
+    '"""TODO: docstring"""\n',
+    "x = '# type: ignore'\n",
+  ]) {
+    assert.deepEqual(problems("a.py", source), [], source);
+  }
+  for (const source of [
+    "x = 1  # type: ignore\n",
+    "x = 1  #type:ignore\n",
+    "x = 1  # TYPE :  IGNORE[attr-defined]\n",
+    "x = 1  # Type:Ignore\n",
+    "x = 1  # noqa: E501\n",
+    "x = 1  # NOQA\n",
+    "# ruff: noqa\n",
+    "# fmt: off\n",
+    "# fmt:skip\n",
+    "# yapf: disable\n",
+    "# isort: skip_file\n",
+    "# autopep8: off\n",
+    "# black: skip\n",
+    "# pylint: disable=C0114\n",
+    "# pylint: skip-file\n",
+    "# pyright: ignore\n",
+    "# mypy: ignore-errors\n",
+    "# pragma: no cover\n",
+    "# nosec\n",
+  ]) {
+    const [problem] = problems("a.py", source);
+    assert.equal(problem?.code, "directive", source);
+    assert.equal(problem?.suppressible, false, source);
+  }
+  assert.ok(
+    !problems("a.py", "# the noqa comment is documented here\n").some(
+      ({ code }) => code === "directive",
+    ),
+  );
+});
+
+await test("Python unterminated strings, brackets, prefixes and nested fields cannot produce a pass", () => {
+  for (const [path, source] of [
+    ["a.py", 's = "abc\n'],
+    ["a.py", "s = '''open\n# Capital\n"],
+    ["a.py", "x = (1,\n"],
+    ["a.py", "print(1))\n"],
+    ["a.py", 's = ub"x"\n'],
+    ["a.rs", 'let s = "abc\n'],
+  ]) {
+    assert.ok(
+      problems(path, source).some(({ status }) => status === "incomplete"),
+      source,
+    );
+  }
+});
+
+await test("Rust literals hide comment markers, and raw strings close only on their own hash count", () => {
+  for (const source of [
+    'let s = "// Capital";\n',
+    'let s = "/* Capital */";\n',
+    'let s = "a \\" // Capital";\n',
+    'let s = r#"// "Capital" "#;\n',
+    'let s = r##"a "# // Capital"##;\n',
+    'let s = br"// Capital"; let t = cr#"/* Capital */"#;\n',
+    'let b = b"// Capital"; let c = c"// Capital";\n',
+  ]) {
+    assert.deepEqual(problems("lib.rs", source), [], source);
+  }
+  assert.deepEqual(
+    problems("lib.rs", "let r#type = 1; // Capital\n").map(({ code }) => code),
+    ["capital"],
+  );
+});
+
+await test("Rust char literals are not strings, and lifetimes are code", () => {
+  const codes = (source: string): string[] => problems("lib.rs", source).map(({ code }) => code);
+  assert.deepEqual(codes("let q = '\"'; // Capital\n"), ["capital"]);
+  assert.deepEqual(codes("let q = '\\''; let s = '\\\\'; // Capital\n"), ["capital"]);
+  assert.deepEqual(codes("let u = '\\u{1F600}'; let e = 'é'; // Capital\n"), ["capital"]);
+  assert.deepEqual(
+    problems("lib.rs", "fn f<'a>(x: &'a str) -> &'a str { // Capital\n    x\n}\n").map(
+      ({ line, code }) => [line, code],
+    ),
+    [[1, "capital"]],
+  );
+  assert.deepEqual(codes("'outer: loop { break 'outer; } // Capital\n"), ["capital"]);
+});
+
+await test("Rust nested block comments end at the outer close and doc comments keep their text", () => {
+  assert.deepEqual(
+    problems("lib.rs", "/* a /* b */ TODO: still inside */\n").map(({ code }) => code),
+    ["block", "task"],
   );
   assert.deepEqual(
-    problems("main.rb", "value = 'it\\'s # not a comment'\n# Capital\n").map(({ line, code }) => [
-      line,
-      code,
-    ]),
-    [[2, "capital"]],
+    problems("lib.rs", '/* outer /* inner */ let x = "/* Capital */"; */\n// Capital\n').map(
+      ({ line, code }) => [line, code],
+    ),
+    [
+      [1, "block"],
+      [2, "capital"],
+    ],
   );
-  assert.deepEqual(problems("main.rb", 'puts "#{1} # not a comment"\n'), []);
-  assert.deepEqual(problems("main.rb", "value = %q{# Capital { data }}\npattern = /[/#]*/\n"), []);
-  assert.deepEqual(problems("main.rb", "value %= 2\n# keep the remainder\n"), []);
+  assert.deepEqual(
+    problems("lib.rs", "/// Capital\n//! Capital\n").map(({ line, code }) => [line, code]),
+    [
+      [1, "capital"],
+      [2, "capital"],
+    ],
+  );
+  assert.deepEqual(
+    problems("lib.rs", "/** Doc */\n/*! Inner */\n").map(({ code }) => code),
+    ["block", "block"],
+  );
+  assert.deepEqual(problems("lib.rs", "// rustfmt::skip\n"), []);
+});
+
+await test("unclosed Rust literals and comments are incomplete", () => {
+  for (const source of [
+    'let s = "abc\n',
+    "/* open /* nested */\n",
+    'let r = r#"open"\n',
+    "let c = '\\n;\n",
+  ]) {
+    assert.ok(
+      problems("lib.rs", source).some(({ status }) => status === "incomplete"),
+      source,
+    );
+  }
 });
 
 await test("shell escaped quotes do not hide a later real comment", () => {
@@ -125,8 +292,8 @@ await test("YAML block scalars and plain apostrophes do not hide following comme
 
 await test("unclosed literals and unsupported interpolation cannot produce a pass", () => {
   for (const [path, source] of [
-    ["a.cpp", 'auto text = R"tag(no end'],
-    ["a.rb", 'puts "#{\n# hidden\n1}"'],
+    ["a.rs", 'let text = r#"no end'],
+    ["a.py", 'x = """no end'],
     ["a.sh", 'echo "$(echo $(pwd))"'],
     ["a.sh", "cat <<EOF\nmissing\n"],
   ]) {
@@ -137,26 +304,20 @@ await test("unclosed literals and unsupported interpolation cannot produce a pas
   }
 });
 
-await test("character literals and embedded heredoc code cannot hide source suppressions", () => {
+await test("heredoc and substitution code cannot hide shell suppressions, and Python strings cannot hide Python ones", () => {
   for (const [path, source] of [
-    ["a.rb", 'quote = ?"\n# rubocop:disable all\nother = ?"\n'],
-    ["a.rb", "value = <<~TEXT\n#{\n# rubocop:disable all\n1}\nTEXT\n"],
-    ["a.rb", 'value = <<"TEXT"\n#{\n# rubocop:disable all\n1}\nTEXT\n'],
     ["a.sh", "cat <<EOF\n$(\n# shellcheck disable=SC2000\necho value)\nEOF\n"],
     ["a.sh", "cat <<EOF\n`echo value`\nEOF\n"],
+    ["a.py", 'x = f"{\n# type: ignore\n}"\n'],
   ]) {
     assert.ok(
       problems(path, source).some(({ status }) => status === "incomplete"),
       source,
     );
   }
-  assert.deepEqual(
-    problems("a.rb", "value = <<~'TEXT'\n=begin\n#{\n# rubocop:disable all\n}\nTEXT\n"),
-    [],
-  );
-  assert.deepEqual(problems("a.rb", "value = <<~TEXT\n#{value}\n\\#{literal}\nTEXT\n"), []);
   assert.deepEqual(problems("a.sh", "cat <<'EOF'\n$(\n# shellcheck disable=SC2000\n)\nEOF\n"), []);
   assert.deepEqual(problems("a.sh", "cat <<EOF\n$(pwd)\nEOF\n"), []);
+  assert.deepEqual(problems("a.py", 'x = """\n# type: ignore\n"""\n'), []);
 });
 
 await test("portable projects do not inherit ozmikhail comment wording; script ASTs stay in the pack", () => {
@@ -179,17 +340,14 @@ await test("portable projects do not inherit ozmikhail comment wording; script A
   assert.equal(problem.rule, "comments.capital");
 });
 
-await test("native suppression controls cannot be disguised as benign tool directives", () => {
+await test("suppression comments are refused in Python, Rust and the other kept languages; attributes and prose are not", () => {
   for (const [path, source] of [
-    ["a.cpp", "// explanation NOLINT(check-name)\n"],
-    ["a.cpp", "// NOLINTNEXTLINE\n"],
-    ["a.cpp", "/* NOLINTBEGIN */\n"],
-    ["a.cpp", "// clang-format off\n"],
-    ["a.rb", "# rubocop:disable all\n"],
-    ["a.rb", "# rubocop:todo Style/StringLiterals\n"],
-    ["a.rb", "# rubocop:push -Style/GuardClause\n"],
-    ["a.rb", "# rubocop:push +Style/For -Style/GuardClause\n"],
-    ["a.rb", "# rubocop:disable-next Metrics/MethodLength\n"],
+    ["a.py", "# type: ignore\n"],
+    ["a.py", "# noqa\n"],
+    ["a.py", "# pragma: no cover\n"],
+    ["a.rs", "// nosec\n"],
+    ["a.rs", "/// pragma: no cover\n"],
+    ["a.rs", "// eslint-disable-next-line\n"],
     ["a.sh", "# shellcheck disable=SC2000\n"],
     ["a.sh", "# shfmt: off\n"],
     ["a.css", "/* prettier-ignore */\n"],
@@ -198,16 +356,15 @@ await test("native suppression controls cannot be disguised as benign tool direc
     assert.equal(problem.code, "directive", source);
     assert.equal(problem.suppressible, false, source);
   }
-  assert.deepEqual(problems("a.cpp", 'const char* text = "NOLINT";\n'), []);
-  assert.deepEqual(problems("a.rb", "# frozen_string_literal: true\n# rubocop:enable all\n"), []);
-  assert.deepEqual(problems("a.rb", "# rubocop:push +Style/For\n# rubocop:pop\n"), []);
+  assert.deepEqual(problems("a.py", 'x = "# type: ignore"\n'), []);
+  assert.deepEqual(problems("a.rs", 'let s = "// nosec";\n'), []);
   assert.deepEqual(problems("a.sh", "#!/bin/sh\n# shellcheck shell=bash\n"), []);
   const context = {
     root: ".",
-    files: ["src/a.cpp"],
+    files: ["src/a.rs"],
     config: policy({
       preset: "portable",
-      projects: [{ root: ".", profile: "cpp", compileCommands: "build" }],
+      projects: [{ root: ".", profile: "rust" }],
     }),
   };
   assert.deepEqual(
@@ -215,8 +372,12 @@ await test("native suppression controls cannot be disguised as benign tool direc
     [],
   );
   assert.equal(
-    checkComments({ ...context, read: () => "// NOLINT\n" })[0]?.rule,
+    checkComments({ ...context, read: () => "// nosec\n" })[0]?.rule,
     "comments.directive",
+  );
+  assert.equal(
+    checkComments({ ...context, read: () => 'let s = "abc\n' })[0]?.rule,
+    "comments.syntax",
   );
 });
 
@@ -256,7 +417,7 @@ await test("tool suppressions in every supported comment syntax are refused, whi
     ),
   );
   assert.deepEqual(
-    problems("src/a.cpp", "//nolint:errcheck\n").map(({ code }) => code),
+    problems("src/a.ts", "//nolint:errcheck\n").map(({ code }) => code),
     ["directive"],
   );
   assert.deepEqual(
@@ -298,6 +459,27 @@ await test("task markers are violations under ozmikhail unless the policy patter
   );
 });
 
+await test("Python and Rust task markers are checked the same way as JavaScript ones", () => {
+  const check = (path: string, source: string, comments?: Record<string, unknown>) =>
+    checkComments({
+      root: ".",
+      files: [path],
+      config: policy({
+        preset: "ozmikhail",
+        ...(comments ? { comments } : {}),
+      }),
+      read: () => source,
+    }).map(({ rule }) => rule);
+  assert.deepEqual(check("src/a.py", "# TODO: fix\n"), ["comments.task"]);
+  assert.deepEqual(check("src/a.rs", "/// FIXME later\n"), ["comments.task"]);
+  assert.deepEqual(check("src/a.rs", 'let s = "TODO: later";\n'), []);
+  assert.deepEqual(check("src/a.py", '"""TODO: docstring"""\n'), []);
+  assert.deepEqual(check("src/a.py", "# TODO(#12): tracked\n", { tasks: "TODO\\(#\\d+\\)" }), []);
+  assert.deepEqual(check("src/a.rs", "// TODO: untracked\n", { tasks: "TODO\\(#\\d+\\)" }), [
+    "comments.task",
+  ]);
+});
+
 await test("task markers inside string literals are data, not comments", () => {
   const found = checkComments({
     root: ".",
@@ -320,10 +502,10 @@ await test("without ozmikhail, task markers are checked only when a tasks patter
   const portable = (comments?: Record<string, unknown>): ReturnType<typeof checkComments> =>
     checkComments({
       root: ".",
-      files: ["app/a.rb"],
+      files: ["app/a.py"],
       config: policy({
         preset: "portable",
-        projects: [{ root: ".", profile: "ruby" }],
+        projects: [{ root: ".", profile: "python" }],
         ...(comments ? { comments } : {}),
       }),
       read: () => "# TODO: later\n",

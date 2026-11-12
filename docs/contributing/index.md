@@ -12,7 +12,7 @@ git config core.hooksPath .githooks
 1. Write the failing fixture first, then the passing one, then the bypasses: aliases, computed access, equivalent rewrites and empty scopes.
 2. Export the rule from its module's `RULES` with a description and remedy.
 3. If the schema changes, run `node scripts/schema.ts`; a test refuses a stale `plumb.schema.json`.
-4. Run `npm test` and `npm run check`. The native suite needs Ruby, RuboCop, clang-format, clang-tidy and the platform's sandbox tool (`sandbox-exec` on macOS, `bwrap` on Linux); CI runs it.
+4. Run `npm test` and `npm run check`. The native suite needs ruff, mypy, a Rust toolchain with rustfmt and clippy, and the platform's sandbox tool (`sandbox-exec` on macOS, `bwrap` on Linux); CI runs it.
 5. Update the guide that owns the behaviour.
 
 ## Commit

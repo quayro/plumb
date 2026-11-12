@@ -11,6 +11,14 @@
     {
       "root": "packages/python",
       "profile": "python"
+    },
+    {
+      "root": "packages/sdk",
+      "profile": "python"
+    },
+    {
+      "root": "packages/sdk",
+      "profile": "rust"
     }
   ],
   "files": {
@@ -72,6 +80,14 @@
   },
   "hooks": {
     "command": ["node", "scripts/plumb.ts"]
+  },
+  "tools": {
+    "versions": {
+      "ruff": "0.17.4",
+      "mypy": "2.4.1",
+      "rustfmt": "1.10.0-stable",
+      "clippy": "0.1.99"
+    }
   },
   "policy": {
     "owners": ["@ozmikhail"],

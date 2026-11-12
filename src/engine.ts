@@ -275,11 +275,7 @@ export async function doctor(options: EngineOptions = {}): Promise<Report> {
       suggestion = {
         schemaVersion: 1,
         preset: "ozmikhail",
-        projects: detectProfiles(found.files).map((profile) => ({
-          root: ".",
-          profile,
-          ...(profile === "cpp" ? { compileCommands: "build" } : {}),
-        })),
+        projects: detectProfiles(found.files).map((profile) => ({ root: ".", profile })),
       };
     } catch (error) {
       // without a readable inventory no starter policy can be suggested; say why alongside the policy error

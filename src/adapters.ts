@@ -16,6 +16,7 @@ import type { Context } from "./context.ts";
 import type { Diagnostic, Rule } from "./diagnostics.ts";
 import { errorMessage } from "./errors.ts";
 import { canonical } from "./files.ts";
+import { NATIVE } from "./native.ts";
 import { type Execute, run } from "./process.ts";
 import { isRecord } from "./schema.ts";
 
@@ -93,7 +94,7 @@ export interface DoctorCheck {
 }
 
 export interface Suggestion {
-  project: { root: string; profile: string; compileCommands?: string };
+  project: { root: string; profile: string };
   files: string[];
   reason: string;
 }
@@ -139,41 +140,44 @@ export async function runAdapters(
     if (["typescript", "react"].includes(project.profile)) {
       continue;
     }
-    const expected = plan.checks.filter(
-      (check) => check.adapter === project.profile && check.root === project.root,
-    );
-    if (["ruby", "cpp"].includes(project.profile)) {
+    if (NATIVE.includes(project.profile)) {
       const result = await nativeRun(ctx, project, execute, false);
       diagnostics.push(...result.diagnostics);
       coverage.push(...result.coverage);
       mergeVersions(result.versions);
       identity.native.push(...result.identities);
-    } else {
-      const entry = registryAdapters(registry).find((adapter) => adapter.id === project.profile);
-      if (!entry || !registry) {
-        continue;
+    }
+    // a built-in profile also runs the source-policy adapter registered under its id
+    const entry = registryAdapters(registry).find((adapter) => adapter.id === project.profile);
+    if (!entry || !registry) {
+      continue;
+    }
+    const expected = plan.checks.filter(
+      (check) =>
+        check.adapter === project.profile &&
+        check.root === project.root &&
+        entry.capabilities.includes(check.capability),
+    );
+    rules.push(...entry.rules);
+    try {
+      if (canonical(registryIdentity(registry)) !== canonical(plan.identity)) {
+        throw new Error("The adapter environment changed after planning");
       }
-      rules.push(...entry.rules);
-      try {
-        if (canonical(registryIdentity(registry)) !== canonical(plan.identity)) {
-          throw new Error("The adapter environment changed after planning");
-        }
-        const result = await externalRun(ctx, project, entry, registry, execute, false);
-        diagnostics.push(...result.diagnostics);
-        coverage.push(...result.coverage);
-        mergeVersions(result.versions);
-        if (canonical(registryIdentity(registry)) !== canonical(plan.identity)) {
-          throw new Error("The adapter environment changed while checking");
-        }
-      } catch (error) {
-        for (const check of expected) {
-          const row = coverage.find((item) => item.id === check.id);
-          if (row) {
-            row.status = "incomplete";
-          }
-        }
-        diagnostics.push(issue("adapters.protocol", project.root, errorMessage(error)));
+      const result = await externalRun(ctx, project, entry, registry, execute, false);
+      diagnostics.push(...result.diagnostics);
+      coverage.push(...result.coverage);
+      mergeVersions(result.versions);
+      if (canonical(registryIdentity(registry)) !== canonical(plan.identity)) {
+        throw new Error("The adapter environment changed while checking");
       }
+    } catch (error) {
+      for (const check of expected) {
+        const row = coverage.find((item) => item.id === check.id);
+        if (row) {
+          row.status = "incomplete";
+        }
+      }
+      diagnostics.push(issue("adapters.protocol", project.root, errorMessage(error)));
     }
   }
   // the pack reports its own rows, so a malformed row passes through to coverage validation
@@ -264,39 +268,38 @@ export async function doctorAdapters(
     }
   }
   for (const project of ctx.config.projects) {
-    if (["ruby", "cpp"].includes(project.profile)) {
+    if (["typescript", "react"].includes(project.profile)) {
+      continue;
+    }
+    if (NATIVE.includes(project.profile)) {
       const result = await nativeRun(ctx, project, execute, true);
       diagnostics.push(...result.diagnostics);
       checks.push(...result.coverage);
       Object.assign(versions, result.versions);
       identity.native.push(...result.identities);
-    } else if (!["typescript", "react"].includes(project.profile)) {
-      const entry = registryAdapters(registry).find((adapter) => adapter.id === project.profile);
-      if (!entry || !registry) {
-        continue;
-      }
-      try {
-        const result = await externalRun(ctx, project, entry, registry, execute, true);
-        diagnostics.push(...result.diagnostics);
-        Object.assign(versions, result.versions);
-        checks.push({
-          id: entry.id,
-          root: project.root,
-          status: result.diagnostics.length ? statusOf(result.diagnostics) : "ready",
-          evidence: "prerequisites-only",
-        });
-      } catch (error) {
-        diagnostics.push(issue("adapters.protocol", project.root, errorMessage(error)));
-      }
+    }
+    const entry = registryAdapters(registry).find((adapter) => adapter.id === project.profile);
+    if (!entry || !registry) {
+      continue;
+    }
+    try {
+      const result = await externalRun(ctx, project, entry, registry, execute, true);
+      diagnostics.push(...result.diagnostics);
+      Object.assign(versions, result.versions);
+      checks.push({
+        id: entry.id,
+        root: project.root,
+        status: result.diagnostics.length ? statusOf(result.diagnostics) : "ready",
+        evidence: "prerequisites-only",
+      });
+    } catch (error) {
+      diagnostics.push(issue("adapters.protocol", project.root, errorMessage(error)));
     }
   }
   const suggestions: Suggestion[] = [];
   const profiles: [string, RegExp][] = [
     ["typescript", /\.[cm]?[jt]sx?$/],
-    ["ruby", /\.(rb|rake|gemspec)$|(?:^|\/)(Gemfile|Rakefile)$/],
-    ["cpp", /\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$/],
-    ["python", /\.py$/],
-    ["go", /\.go$/],
+    ["python", /\.pyi?$/],
     ["rust", /\.rs$/],
   ];
   for (const [profile, pattern] of profiles) {
@@ -305,13 +308,9 @@ export async function doctorAdapters(
       .map((file) => file.path);
     if (files.length) {
       suggestions.push({
-        project: { root: ".", profile, ...(profile === "cpp" ? { compileCommands: "build" } : {}) },
+        project: { root: ".", profile },
         files,
-        reason:
-          registryAdapters(registry).some((entry) => entry.id === profile) ||
-          ["typescript", "ruby", "cpp"].includes(profile)
-            ? "Review a project profile for these unowned source files."
-            : "Install an approved external adapter, then review this project profile.",
+        reason: "Review a project profile for these unowned source files.",
       });
     }
   }

@@ -187,11 +187,21 @@ await test("repair preview rejects policy, generated assets, API snapshots and l
       "custom-policy.json": "{}\n",
       "old.surface.json": "{}\n",
       "generated.txt": "owned\n",
+      "ruff.toml": "line-length = 100\n",
+      "Cargo.toml": "[package]\n",
     },
     { generated: [{ path: "generated.txt", content: "owned\n" }] },
   );
   ctx.protectedFiles = ["custom-policy.json"];
-  for (const path of ["plumb.json", "custom-policy.json", "old.surface.json", "generated.txt"]) {
+  // native tool policies are protected like the rest of the policy files
+  for (const path of [
+    "plumb.json",
+    "custom-policy.json",
+    "old.surface.json",
+    "generated.txt",
+    "ruff.toml",
+    "Cargo.toml",
+  ]) {
     const original = readFileSync(join(root, path));
     await assert.rejects(preview(ctx, change(path, "changed\n")), /Repair cannot change/);
     assert.deepEqual(readFileSync(join(root, path)), original);

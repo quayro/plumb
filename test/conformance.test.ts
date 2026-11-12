@@ -12,7 +12,7 @@ import { at } from "../src/schema.ts";
 import { cli, roots, temporary } from "./ratchet-support.ts";
 import { mapped, parseReport } from "./support.ts";
 
-const go = fileURLToPath(new URL("../packages/go/adapter.ts", import.meta.url));
+const rust = fileURLToPath(new URL("../packages/rust/adapter.ts", import.meta.url));
 
 function tools(): string {
   const folder = mkdtempSync(join(temporary, "plumb-conformance-tools-"));
@@ -48,7 +48,10 @@ function lax(sandbox: boolean): string {
           files: ["**/*.lax"],
           capabilities: ["policy"],
           command: [node, script],
-          integrity: [node, script].map((path) => ({ path, sha256: fileHash(path) })),
+          integrity: [node, script].map((path) => ({
+            path,
+            sha256: fileHash(path),
+          })),
           rules: [{ id: "lax/any", description: "Anything.", remedy: "Nothing." }],
           sandbox,
         },
@@ -65,7 +68,7 @@ const failed = (text: string): unknown[] =>
 
 await test("a conforming adapter passes every probe", async () => {
   const registry = join(tools(), "registry.json");
-  writeFileSync(registry, spawnSync(process.execPath, [go, "--manifest"]).stdout);
+  writeFileSync(registry, spawnSync(process.execPath, [rust, "--manifest"]).stdout);
   const { code, text } = await cli(["conformance", "--adapters", registry]);
   assert.equal(code, 0, text);
   assert.deepEqual(
@@ -125,8 +128,10 @@ await test("a sandboxed adapter can read the checkout but cannot write to it", a
     target = join(folder, "written"),
     script = `const fs = require("node:fs"); let wrote = true;
       try { fs.writeFileSync(${JSON.stringify(target)}, "x"); } catch { wrote = false; }
-      console.log(JSON.stringify({ wrote, read: fs.readFileSync(${JSON.stringify(go)}).length > 0 }));`;
-  const result = await run(sandboxed([process.execPath, "-e", script]), { cwd: folder });
+      console.log(JSON.stringify({ wrote, read: fs.readFileSync(${JSON.stringify(rust)}).length > 0 }));`;
+  const result = await run(sandboxed([process.execPath, "-e", script]), {
+    cwd: folder,
+  });
   assert.deepEqual(JSON.parse(result.stdout), { wrote: false, read: true });
   assert.equal(existsSync(target), false);
   // the same lax adapter, sandboxed by its registry entry, can no longer leave a file behind

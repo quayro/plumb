@@ -144,7 +144,7 @@ function policyPointer(rule: string): string {
   if (rule.startsWith("policy.")) {
     return "/policy";
   }
-  if (/^(?:ruby|cpp|projects|adapters?)\./.test(rule)) {
+  if (/^(?:python|rust|projects|adapters?)\./.test(rule)) {
     return "/projects";
   }
   return "";

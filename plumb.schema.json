@@ -44,7 +44,6 @@
             "uniqueItems": true
           },
           "javascript": { "type": "object" },
-          "compileCommands": { "type": "string", "minLength": 1, "format": "path" },
           "prepare": {
             "type": "array",
             "items": {

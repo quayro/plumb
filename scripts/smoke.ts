@@ -85,7 +85,7 @@ export function smoke(
       projects: [
         {
           root: ".",
-          profile: "ruby",
+          profile: "python",
           prepare: [
             [
               process.execPath,
@@ -104,22 +104,19 @@ export function smoke(
     assert.equal(at(run(["check"]), "status"), "pass");
     setPolicy({ unknownOption: true });
     assert.equal(at(run(["check"], 2), "status"), "incomplete");
-    for (const name of ["ruby", "cpp"]) {
+    for (const name of ["py", "crate"]) {
       mkdirSync(join(root, name));
     }
     setPolicy({
       projects: [
-        { root: "ruby", profile: "ruby" },
-        { root: "cpp", profile: "cpp", compileCommands: "cpp/build" },
+        { root: "py", profile: "python" },
+        { root: "crate", profile: "rust" },
       ],
     });
     assert.equal(at(run(["sync"]), "status"), "pass");
-    assert.match(readFileSync(join(root, "ruby/.rubocop.yml"), "utf8"), /EnabledByDefault: true/);
-    assert.match(readFileSync(join(root, "cpp/.clang-tidy"), "utf8"), /WarningsAsErrors: "\*"/);
-    const style: unknown = JSON.parse(
-      readFileSync(join(root, "cpp/.clang-format"), "utf8").split("\n").slice(1).join("\n"),
-    );
-    assert.equal(at(style, "InsertBraces"), true);
+    assert.match(readFileSync(join(root, "py/ruff.toml"), "utf8"), /select = \["ALL"\]/);
+    assert.match(readFileSync(join(root, "py/mypy.ini"), "utf8"), /strict = True/);
+    assert.match(readFileSync(join(root, "crate/rustfmt.toml"), "utf8"), /max_width = 100/);
     assert.deepEqual(at(run(["sync"]), "written"), []);
     setPolicy({ projects: [{ root: ".", profile: "typescript" }] });
     writeFileSync(join(root, "index.ts"), "export const value = 1;\n");

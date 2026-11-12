@@ -54,12 +54,9 @@ const NAMING: [RegExp, RegExp, string][] = [
     "kebab-case",
   ],
   [/\.css$/, /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.module)?\.css$/, "kebab-case"],
-  [/\.(?:rb|rake|gemspec)$/, /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*\.(?:rb|rake|gemspec)$/, "snake_case"],
-  [
-    /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx)$/,
-    /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx)$/,
-    "snake_case",
-  ],
+  // a python module may be private or a dunder such as __init__
+  [/\.pyi?$/, /^_{0,2}[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:__)?\.pyi?$/, "snake_case"],
+  [/\.rs$/, /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*\.rs$/, "snake_case"],
 ];
 
 export function checkFiles(

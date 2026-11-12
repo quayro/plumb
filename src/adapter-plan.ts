@@ -7,7 +7,7 @@ import type { Diagnostic, Rule, Status } from "./diagnostics.ts";
 import { errorMessage } from "./errors.ts";
 import { canonical, globMatches, isWithin } from "./files.ts";
 import { formatToolFiles } from "./format-tools.ts";
-import { nativeSource } from "./native.ts";
+import { NATIVE, nativeSource } from "./native.ts";
 import { validateSchema } from "./schema.ts";
 
 // which checks a run owes: every selected file maps to an adapter capability or an explanation
@@ -145,7 +145,7 @@ export function profileSource(
   if (["typescript", "react"].includes(profile)) {
     return script(file);
   }
-  if (["ruby", "cpp"].includes(profile)) {
+  if (NATIVE.includes(profile)) {
     return nativeSource(profile, file);
   }
   const descriptor = registryAdapters(registry).find((entry) => entry.id === profile);
@@ -175,12 +175,16 @@ export function projectFiles(
 }
 
 export function sourceProfiles(file: string, registry?: AdapterRegistry): string[] {
-  const profiles = ["typescript", "react", "ruby", "cpp"].filter((profile) =>
+  const profiles = ["typescript", "react", ...NATIVE].filter((profile) =>
     profileSource(profile, file),
   );
   const parts = file.split("/");
   for (const entry of registryAdapters(registry)) {
-    if (parts.some((_part, index) => globMatches(entry.files, parts.slice(index).join("/")))) {
+    // an adapter may share its id with the built-in profile it adds source policy to
+    if (
+      !profiles.includes(entry.id) &&
+      parts.some((_part, index) => globMatches(entry.files, parts.slice(index).join("/")))
+    ) {
       profiles.push(entry.id);
     }
   }
@@ -204,8 +208,7 @@ export function planAdapters(
     known = [
       "typescript",
       "react",
-      "ruby",
-      "cpp",
+      ...NATIVE,
       ...registryAdapters(registry).map((entry) => entry.id),
     ];
   const selections = new Map(
@@ -248,7 +251,8 @@ export function planAdapters(
       if (!selected.length) {
         throw new Error(`No ${project.profile} source files are owned by this project`);
       }
-      if (adapter !== "javascript" && !["ruby", "cpp"].includes(adapter)) {
+      // a python or rust project takes options only for the source-policy adapter of the same id
+      if (adapter !== "javascript" && (descriptor || !NATIVE.includes(adapter))) {
         validateSchema(
           project.options ?? {},
           descriptor?.optionsSchema ?? {},
@@ -276,18 +280,16 @@ export function planAdapters(
           });
         }
       }
-    } else if (adapter === "ruby") {
-      add(adapter, project.root, "lint", selected, "tool-reported");
-    } else if (adapter === "cpp") {
-      add(adapter, project.root, "format", selected, "explicit-inputs");
-      add(
-        adapter,
-        project.root,
-        "lint",
-        selected.filter((file) => !/\.(h|hh|hpp|hxx)$/.test(file)),
-        "explicit-inputs",
-      );
     } else {
+      if (adapter === "python") {
+        for (const capability of ["format", "lint", "types"]) {
+          add(adapter, project.root, capability, selected, "explicit-inputs");
+        }
+      } else if (adapter === "rust") {
+        add(adapter, project.root, "format", selected, "tool-reported");
+        // clippy lints what cargo compiles, so it answers for the project, not for each file
+        add(adapter, project.root, "lint", [], "process-exit", { scope: "project" });
+      }
       for (const capability of descriptor?.capabilities ?? []) {
         add(adapter, project.root, capability, selected, "adapter-reported");
       }

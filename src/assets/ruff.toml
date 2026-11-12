@@ -1,0 +1,24 @@
+line-length = 100
+
+[lint]
+# every rule, including those ruff leaves off by default
+select = ["ALL"]
+ignore = [
+  # a boundary may report any failure; the silent handlers are what plumb refuses
+  "BLE001",
+  # the formatter owns trailing commas
+  "COM812",
+  # a license lives in LICENSE, not a header in every file
+  "CPY001",
+  # contradicts D211, which ruff also enables
+  "D203",
+  # contradicts D212, which ruff also enables
+  "D213",
+  # a script or a namespace package needs no __init__.py
+  "INP001",
+]
+
+[lint.per-file-ignores]
+# a test asserts; plumb requires it
+"**/test_*.py" = ["S101"]
+"**/*_test.py" = ["S101"]

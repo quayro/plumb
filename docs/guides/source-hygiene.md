@@ -8,7 +8,7 @@ Plumb lists files with `git ls-files --cached --others --exclude-standard`, so i
 
 ## Suppression comments
 
-Comments that switch a tool off are refused in every supported comment syntax: `eslint-disable`, `@ts-ignore`, `prettier-ignore`, `biome-ignore`, `stylelint-disable`, `markdownlint-disable`, `noqa`, `type: ignore`, `pragma: no cover`, `nosec`, `pylint: disable`, `NOLINT`, `nolint`, `rubocop:disable`, `shellcheck disable`, `hadolint ignore`, `yamllint disable`, `istanbul ignore`, `c8 ignore`, `v8 ignore` and similar. A real exception is a reasoned entry in `plumb.json`.
+Comments that switch a tool off are refused in every supported comment syntax: `eslint-disable`, `@ts-ignore`, `prettier-ignore`, `biome-ignore`, `stylelint-disable`, `markdownlint-disable`, `noqa`, `type: ignore`, `pragma: no cover`, `nosec`, `pylint: disable`, `fmt: off`, `nolint`, `shellcheck disable`, `hadolint ignore`, `yamllint disable`, `istanbul ignore`, `c8 ignore`, `v8 ignore` and similar. A real exception is a reasoned entry in `plumb.json`.
 
 ## Task markers
 

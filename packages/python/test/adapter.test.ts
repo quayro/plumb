@@ -7,7 +7,7 @@ import { doctorAdapters } from "../../../src/adapters.ts";
 import { digest } from "../../../src/files.ts";
 import { at } from "../../../src/schema.ts";
 import { lengthOf } from "../../../test/support.ts";
-import { fixture, manifest, script } from "./adapter-support.ts";
+import { execute, fixture, manifest, script } from "./adapter-support.ts";
 
 await test("manifest pins the actual interpreter and adapter with a ready strict registry", (t) => {
   const { registry } = fixture(t),
@@ -41,8 +41,12 @@ await test("real checks cover .py and .pyi sources without running candidate cod
   });
   const result = await run();
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(result.coverage.length, 2);
-  for (const row of result.coverage) {
+  // the python profile also runs ruff and mypy rows; only the adapter's own rows are asserted here
+  const rows = result.coverage.filter(
+    (row) => row.capability === "syntax" || row.capability === "policy",
+  );
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
     assert.equal(row.status, "pass");
     assert.equal(row.completed, true);
     assert.deepEqual(row.checkedFiles, ["api.pyi", "ast.py", "main.py", "sitecustomize.py"]);
@@ -185,7 +189,12 @@ await test("syntax errors, invalid encodings and context-invalid ASTs never clai
   );
   const result = await run();
   assert.ok(result.diagnostics.some((item) => item.rule === "adapters.coverage"));
-  assert.ok(result.coverage.every((row) => row.status === "incomplete" && !row.completed));
+  // the ruff and mypy rows are not the adapter's; the adapter's rows must never claim completion
+  const rows = result.coverage.filter(
+    (row) => row.capability === "syntax" || row.capability === "policy",
+  );
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.status === "incomplete" && !row.completed));
 });
 
 await test("doctor validates prerequisites and options without reading or claiming source coverage", async (t) => {
@@ -194,7 +203,7 @@ await test("doctor validates prerequisites and options without reading or claimi
   assert.equal(output.status, "pass");
   assert.deepEqual(output.coverage, []);
   assert.deepEqual(output.inputs, []);
-  const result = await doctorAdapters(ctx, { registry });
+  const result = await doctorAdapters(ctx, { registry, execute });
   assert.deepEqual(result.diagnostics, []);
   assert.equal(result.checks[0].status, "ready");
   assert.equal(result.checks[0].evidence, "prerequisites-only");
@@ -215,7 +224,7 @@ await test("generic prepare metadata is accepted without running its commands du
   const result = await run();
   assert.deepEqual(result.diagnostics, []);
   assert.ok(result.coverage.every((row) => row.status === "pass"));
-  const doctor = await doctorAdapters(ctx, { registry });
+  const doctor = await doctorAdapters(ctx, { registry, execute });
   assert.deepEqual(doctor.diagnostics, []);
   assert.equal(doctor.checks[0].status, "ready");
   assert.equal(existsSync(join(root, "prepared")), false);
@@ -334,7 +343,13 @@ await test("test skips are found through aliases, assignments and decoy scopes",
     "test_clean.py": "import json as pytest\ndef test_a():\n    assert pytest.dumps(1) == '1'\n",
   });
   assert.deepEqual(
-    [...new Set(direct().diagnostics.map((item) => `${item.path} ${item.rule}`))],
+    [
+      ...new Set(
+        direct()
+          .diagnostics.filter((item) => item.rule === "python/skip")
+          .map((item) => `${item.path} ${item.rule}`),
+      ),
+    ],
     Object.keys(skipped)
       .sort()
       .map((path) => `${path} python/skip`),

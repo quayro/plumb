@@ -14,7 +14,7 @@
     "packages/javascript",
     "packages/python/test",
     "packages/sdk",
-    "packages/go"
+    "packages/rust"
   ],
   "exclude": ["**/node_modules"]
 }
