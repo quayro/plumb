@@ -74,11 +74,11 @@ The adapter implements Plumb external protocol version 1 over stdin/stdout JSON.
 Run the optional integration suite with a real interpreter:
 
 ```sh
-npm run test:python
+bun run test:python
 # Equivalent direct runner:
 node --test packages/python/test/adapter.test.ts
 # Select a particular interpreter:
-PLUMB_TEST_PYTHON=/absolute/path/to/python3 npm run test:python
+PLUMB_TEST_PYTHON=/absolute/path/to/python3 bun run test:python
 ```
 
 The suite has no skips or fake Python parser. Missing Python fails this optional gate; the portable core test suite remains Node-only.

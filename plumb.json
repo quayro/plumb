@@ -58,6 +58,11 @@
         "file": "docs/reference/cli.md",
         "region": "cli",
         "command": ["node", "bin/plumb.ts", "--help"]
+      },
+      {
+        "file": "docs/reference/conventions.md",
+        "region": "conventions",
+        "command": ["node", "bin/plumb.ts", "instructions"]
       }
     ]
   },

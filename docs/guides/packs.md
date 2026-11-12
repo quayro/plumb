@@ -88,6 +88,6 @@ Replace the copied file with the `policy` that `plumb packs` prints for the new 
 2. List it in `src/assets/packs.json` with a description and the repository types it suits.
 3. Keep it additive: required and forbidden files, custom rules, commits, verification. A pack never carries exclusions or exceptions.
 4. Regenerate the public registry with `rm -r packs && node bin/plumb.ts packs --export packs`; a test refuses a stale one.
-5. Add its expectations to `test/init.test.ts`, then run `npm test` and `npm run check`.
+5. Add its expectations to `test/init.test.ts`, then run `bun run test` and `bun run check`.
 
 A pack that is specific to one organization or community does not need to be shipped: publish it in a registry of your own.
