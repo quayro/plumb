@@ -7,6 +7,29 @@ import { asError } from "./errors.ts";
 
 const PREFIX = /^(?:[rRuU]|[bBfFtT][rR]?|[rR][bBfFtT])$/; // the string prefixes Python accepts
 const WORD = /\w+/y;
+// keywords that can stand directly before an expression, so a string may follow them with no space
+const KEYWORDS = new Set([
+  "and",
+  "assert",
+  "await",
+  "case",
+  "elif",
+  "else",
+  "for",
+  "from",
+  "if",
+  "in",
+  "is",
+  "lambda",
+  "match",
+  "not",
+  "or",
+  "raise",
+  "return",
+  "while",
+  "with",
+  "yield",
+]);
 const CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
 
 class Unlexable extends Error {
@@ -51,10 +74,12 @@ export function pythonComments(source: string): Scan {
         const word = WORD.exec(source)?.[0] ?? "";
         index += word.length;
         if (source[index] === '"' || source[index] === "'") {
-          if (!PREFIX.test(word)) {
+          if (PREFIX.test(word)) {
+            index = string(index, word);
+          } else if (!KEYWORDS.has(word)) {
+            // a keyword before a string is code (return"x"); any other word before one is not Python
             fail(index - word.length, `The Python string prefix "${word}" is not recognized.`);
           }
-          index = string(index, word);
         }
       } else {
         if ("([{".includes(char)) {
@@ -99,7 +124,12 @@ export function pythonComments(source: string): Scan {
           index = close + 1;
         } else {
           const next = source[index + 1];
-          index += next === "{" || next === "}" ? 1 : 2;
+          // a backslash before CRLF continues the line; the pair is one line break
+          if (next === "\r" && source[index + 2] === "\n") {
+            index += 3;
+          } else {
+            index += next === "{" || next === "}" ? 1 : 2;
+          }
         }
       } else if (char === "\n" && delimiter.length === 1) {
         fail(start, "A Python string is not closed.");

@@ -173,6 +173,26 @@ await test("Python unterminated strings, brackets, prefixes and nested fields ca
   }
 });
 
+await test("a Python keyword directly before a string is code, while an unknown word before one stays incomplete", () => {
+  assert.deepEqual(problems("a.py", 'def f():\n    return"abc"\n'), []);
+  assert.deepEqual(problems("a.py", 'if x in"abc":\n    pass\n'), []);
+  assert.deepEqual(
+    problems("a.py", 'if x in"abc": # Capital\n    pass\n').map(({ code }) => code),
+    ["capital"],
+  );
+  assert.ok(problems("a.py", 'y = xor"abc"\n').some(({ status }) => status === "incomplete"));
+});
+
+await test("a backslash continuation inside a string in a CRLF file is one line break", () => {
+  assert.deepEqual(problems("a.py", 's = "abc\\\r\ndef"\n'), []);
+  assert.deepEqual(
+    problems("a.py", 's = "abc\\\r\ndef"\n# Capital\n').map(({ code }) => code),
+    ["capital"],
+  );
+  // a bare CRLF without the backslash still ends the single-quoted string
+  assert.ok(problems("a.py", 's = "abc\r\ndef"\n').some(({ status }) => status === "incomplete"));
+});
+
 await test("Rust literals hide comment markers, and raw strings close only on their own hash count", () => {
   for (const source of [
     'let s = "// Capital";\n',
