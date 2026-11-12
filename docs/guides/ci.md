@@ -46,7 +46,9 @@ jobs:
           fi
           bun --no-env-file tools/plumb/bin/plumb.ts check ${base:+--base "$base"}
       - if: github.event_name == 'pull_request'
-        run: bun --no-env-file tools/plumb/bin/plumb.ts commits --range "origin/${{ github.base_ref }}..HEAD"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bun --no-env-file tools/plumb/bin/plumb.ts commits --range "origin/$BASE_REF..HEAD"
       - if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
