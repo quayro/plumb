@@ -308,3 +308,58 @@ await test("recognized source files without a configured project or adapter are 
     0,
   );
 });
+
+await test("removed Ruby and C/C++ sources are refused under ozmikhail until a configured adapter or an exclusion covers them", (t) => {
+  const contents = {
+    "main.cpp": "int main() {}\n",
+    "app.rb": "puts 'ok'\n",
+    "src/a.c": "int a;\n",
+    "src/a.h": "int a;\n",
+    "tasks.rake": "task :t\n",
+    "lib.gemspec": "Gem::Specification.new\n",
+  };
+  const unsupportedPaths = (plan: ReturnType<typeof planAdapters>): (string | undefined)[] =>
+    plan.diagnostics
+      .filter((item) => item.rule === "projects.unsupported")
+      .map((item) => item.path);
+  const { ctx, registry } = fixture(t, contents, { preset: "ozmikhail", projects: [] });
+  assert.deepEqual(unsupportedPaths(planAdapters(ctx, { registry: registry() })), [
+    "app.rb",
+    "lib.gemspec",
+    "main.cpp",
+    "src/a.c",
+    "src/a.h",
+    "tasks.rake",
+  ]);
+  const rubyAdapter = {
+    id: "ruby",
+    files: ["**/*.rb"],
+    capabilities: ["syntax"],
+    rules: [
+      { id: "ruby/syntax", description: "Ruby syntax is valid", remedy: "Correct source syntax" },
+    ],
+  };
+  const configured = fixture(t, contents, {
+    preset: "ozmikhail",
+    projects: [{ root: ".", profile: "ruby" }],
+  });
+  const approved = unsupportedPaths(
+    planAdapters(configured.ctx, { registry: configured.registry("", rubyAdapter) }),
+  );
+  assert.ok(!approved.includes("app.rb"));
+  assert.ok(approved.includes("main.cpp"));
+  const excluded = fixture(t, contents, {
+    preset: "ozmikhail",
+    projects: [],
+    exclude: [
+      {
+        files: ["**/*.c", "**/*.h", "**/*.cpp", "*.rb", "*.rake", "*.gemspec"],
+        reason: "vendored",
+      },
+    ],
+  });
+  assert.deepEqual(
+    unsupportedPaths(planAdapters(excluded.ctx, { registry: excluded.registry() })),
+    [],
+  );
+});
