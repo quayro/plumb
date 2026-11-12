@@ -65,6 +65,7 @@
     "tasks": "^TODO\\(#\\d+\\)"
   },
   "commits": {
+    "scopes": ["plumb"],
     "maxLength": 100
   },
   "hooks": {
