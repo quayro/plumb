@@ -1,0 +1,35 @@
+[changelog]
+body = '''
+## Changes
+
+{% for group, entries in commits | group_by(attribute="group") -%}
+{% for commit in entries -%}
+- **{{ group }}** — {{ commit.message | split(pat="\n") | first | upper_first }}
+{% endfor -%}
+{% endfor %}
+## Upgrade notes
+
+_Replace with reviewed rollout steps and prerequisites, or state that none are required._
+
+## Verification
+
+{% if previous.version and version -%}
+[Changes since {{ previous.version }}](https://github.com/quayro/plumb/compare/{{ previous.version }}...{{ version }})
+
+{% endif -%}
+_Add the verification run links for the release commit and any target-specific preflight results._
+'''
+trim = true
+
+[git]
+tag_pattern = '^v[0-9]{2}\.(?:[1-9]|1[0-2])\.[0-9]+(?:-[0-9A-Za-z.-]+)?$'
+# --current needs stable ordering across newly created and fetched tags.
+topo_order = false
+conventional_commits = true
+filter_unconventional = false
+commit_parsers = [
+    { field = "breaking", pattern = "^true$", group = "Breaking" },
+    { message = '^feat[(:]', group = "Feature" },
+    { message = '^fix[(:]', group = "Fix" },
+    { message = ".*", group = "Other" },
+]
