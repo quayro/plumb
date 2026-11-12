@@ -98,12 +98,20 @@ DYNAMIC = {
     "__builtins__.__import__",
 }
 ESCAPES = {"importlib", "builtins", "__builtins__"}
+# sys.modules hands out every loaded module, builtins included, so each reference to it escapes
+LOADED = "sys.modules"
+# the longest dotted path an alias carries; no module path a policy names is deeper
+DEPTH = 8
+LINE_BREAK = re.compile(r"\r\n|\r|\n")
 SKIPS = {
+    "pytest.importorskip",
     "pytest.mark.skip",
     "pytest.mark.skipif",
     "pytest.mark.xfail",
     "pytest.skip",
     "pytest.xfail",
+    "unittest.SkipTest",
+    "unittest.expectedFailure",
     "unittest.skip",
     "unittest.skipIf",
     "unittest.skipUnless",
@@ -474,6 +482,11 @@ def validate(request: object) -> Plan:
     return root, project_root, restrictions, observed[0], fields["action"]
 
 
+def source_lines(source: str) -> list[str]:
+    """Return the lines of source, split only at the line breaks that ast counts."""
+    return LINE_BREAK.split(source)
+
+
 def column_of(lines: list[str], node: Located) -> int:
     """Return the 1-based UTF-8 column where node starts on its line."""
     return len(lines[node.lineno - 1].encode("utf8")[: node.col_offset].decode("utf8")) + 1
@@ -496,12 +509,17 @@ class Scopes:
         while stack:
             node, scope = stack.pop()
             stack.extend(reversed(self.note(node, scope)))
-        # a plain assignment passes its value's meaning on; chains longer than this stay unfollowed
-        for _ in range(8):
+        # a plain assignment passes its value's meaning on. Each round only adds paths, and a path
+        # that an alias extends from itself (node = node.parent) stops at DEPTH, so this ends
+        changed = True
+        while changed:
+            changed = False
             for scope, name, value in self.aliases:
-                self.bindings[self.declared.get(scope, {}).get(name, scope)][name] |= self.targets(
-                    value
-                )
+                names = self.bindings[self.declared.get(scope, {}).get(name, scope)][name]
+                found = {path for path in self.targets(value) if path.count(".") < DEPTH}
+                if not found <= names:
+                    names |= found
+                    changed = True
 
     def bind(self, scope: ast.AST, name: str, target: str | None = None) -> None:
         """Record that name is bound in scope, to the import target when there is one."""
@@ -625,7 +643,8 @@ def escaped_name(
         (
             item
             for item in targets
-            if (item in ESCAPES and id(node) not in bases | followed)
+            if item == LOADED
+            or (item in ESCAPES and id(node) not in bases | followed)
             or (
                 "." in item
                 and item.rsplit(".", 1)[0] in ESCAPES
@@ -681,7 +700,7 @@ def dynamic_findings(
     scopes: Scopes,
 ) -> list[Diagnostic]:
     """Find dynamic imports the adapter cannot follow, and literal ones it can check."""
-    lines, findings = source.splitlines(), []
+    lines, findings = source_lines(source), []
     calls = {id(node.func): node for node in ast.walk(tree) if isinstance(node, ast.Call)}
     bases = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
     for scope, names in scopes.bindings.items():
@@ -736,7 +755,7 @@ def dynamic_findings(
 
 def skip_findings(tree: ast.Module, source: str, path: str, scopes: Scopes) -> list[Diagnostic]:
     """Find test code that skips, xfails or expects failure."""
-    lines, findings = source.splitlines(), []
+    lines, findings = source_lines(source), []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Name, ast.Attribute)):
             continue
@@ -814,6 +833,23 @@ def always_true(node: ast.expr) -> bool:
         return any(results) if isinstance(node.op, ast.Or) else all(results)
     if isinstance(node, ast.IfExp):
         return always_true(node.body) and always_true(node.orelse)
+    return (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, ast.Not)
+        and always_false(node.operand)
+    )
+
+
+def always_false(node: ast.expr) -> bool:
+    """Return True when the expression is falsy whatever the code under test does."""
+    if isinstance(node, ast.Constant):
+        return not node.value
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return not node.elts
+    if isinstance(node, ast.Dict):
+        return not node.keys
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return always_true(node.operand)
     return False
 
 
@@ -859,6 +895,11 @@ def asserts_in(
             return True
         if isinstance(node, ast.Call) and real_call(node, receiver, scopes):
             return True
+        # a constant test decides which branch runs; the other branch's assertions never run
+        if isinstance(node, ast.If) and (always_true(node.test) or always_false(node.test)):
+            pending.append(node.test)
+            pending.extend(node.body if always_true(node.test) else node.orelse)
+            continue
         # nested functions, classes and lambdas are not the test body, so their asserts never count
         if not isinstance(node, NESTED):
             pending.extend(ast.iter_child_nodes(node))
@@ -869,7 +910,7 @@ def assertion_findings(
     tree: ast.Module, source: str, path: str, scopes: Scopes
 ) -> list[Diagnostic]:
     """Find test functions that contain no assertion that can fail."""
-    lines, findings = source.splitlines(), []
+    lines, findings = source_lines(source), []
     for node in ast.walk(tree):
         owner = scopes.parent.get(node)
         if not isinstance(
@@ -896,7 +937,7 @@ def assertion_findings(
 
 def except_findings(tree: ast.Module, source: str, path: str) -> list[Diagnostic]:
     """Find bare and silently discarding exception handlers."""
-    lines, findings = source.splitlines(), []
+    lines, findings = source_lines(source), []
     for node in ast.walk(tree):
         if not isinstance(node, TRY):
             continue
@@ -941,7 +982,7 @@ def import_findings(
     findings: list[Diagnostic] = []
     local = path if project_root == "." else path[len(project_root) + 1 :]
     package = local.split("/")[:-1]
-    lines = source.splitlines()
+    lines = source_lines(source)
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue

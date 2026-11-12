@@ -298,6 +298,9 @@ await test("import machinery that escapes analysis is incomplete, never a pass",
       'class Box:\n    import importlib\nBox.importlib.import_module("subprocess")\n',
     "computed.py": 'import importlib\nname = "sub" + "process"\nimportlib.import_module(name)\n',
     "reference.py": "import functools\nload = functools.partial(__import__)\n",
+    "modules.py": 'import sys\nsys.modules["builtins"].__import__("subprocess")\n',
+    "modules_get.py": 'import sys\nsys.modules.get("builtins").__import__("subprocess")\n',
+    "modules_name.py": 'from sys import modules\nmodules["builtins"].__import__("subprocess")\n',
   };
   for (const [path, source] of Object.entries(escapes)) {
     const output = fixture(t, { [path]: source }, FORBID_SUBPROCESS).direct();
