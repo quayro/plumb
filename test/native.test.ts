@@ -472,3 +472,139 @@ await test("clippy output without build-finished, or with a contradicting status
     );
   }
 });
+
+const rustSteps = (files: string[], root: string): void => {
+  nativeSteps({ root, files, config: { projects: [{ root: ".", profile: "rust" }] } });
+};
+
+await test("a compiler wrapper or rustc override in a cargo config or manifest is a scope error", () => {
+  for (const config of [
+    '[build]\nrustc-wrapper = "sccache"\n',
+    '[build]\nrustc-workspace-wrapper = "x"\n',
+    '[build]\nrustc = "x"\n',
+    '[env]\nRUSTC_WRAPPER = "x"\n',
+  ]) {
+    for (const name of [".cargo/config.toml", ".cargo/config"]) {
+      fixture({ "Cargo.toml": "", "src/main.rs": "", [name]: config }, (root, files) => {
+        assert.throws(() => rustSteps(files, root), /compiler wrapper/, config);
+      });
+    }
+  }
+  fixture({ "Cargo.toml": '[build]\nrustc-wrapper = "x"\n', "src/main.rs": "" }, (root, files) => {
+    assert.throws(() => rustSteps(files, root), /Cargo\.toml: a compiler wrapper/);
+  });
+});
+
+await test("--force-warn in a cargo config's rustflags is a scope error", () => {
+  for (const flags of ['["--force-warn", "clippy::all"]', '["--force-warn=clippy::all"]']) {
+    fixture(
+      {
+        "Cargo.toml": "",
+        "src/main.rs": "",
+        ".cargo/config.toml": `[build]\nrustflags = ${flags}\n`,
+      },
+      (root, files) => {
+        assert.throws(() => rustSteps(files, root), /rustflags that allow or cap/, flags);
+      },
+    );
+  }
+});
+
+await test("a TOML escape in a manifest or cargo config is a scope error, never read as a level", () => {
+  fixture(
+    { "Cargo.toml": '[lints.clippy]\nlen_zero = "\\u0061llow"\n', "src/main.rs": "" },
+    (root, files) => {
+      assert.throws(() => rustSteps(files, root), /Cargo\.toml: .*escape/);
+    },
+  );
+  fixture(
+    {
+      "Cargo.toml": "",
+      "src/main.rs": "",
+      ".cargo/config.toml": '[build]\nrustflags = ["-\\u0041warnings"]\n',
+    },
+    (root, files) => {
+      assert.throws(() => rustSteps(files, root), /\.cargo\/config\.toml: .*escape/);
+    },
+  );
+});
+
+await test("a member of an ancestor workspace is a scope error that names the workspace root", () => {
+  fixture(
+    {
+      "Cargo.toml": '[workspace]\nmembers = ["member"]\n',
+      "member/Cargo.toml": "",
+      "member/src/lib.rs": "",
+    },
+    (root, files) => {
+      assert.throws(
+        () =>
+          nativeSteps({ root, files, config: { projects: [{ root: "member", profile: "rust" }] } }),
+        /configure the workspace root/,
+      );
+    },
+  );
+});
+
+await test("a root package that is also a workspace passes --workspace to clippy and --all to rustfmt", () => {
+  fixture(
+    {
+      "Cargo.toml": '[package]\nname = "root"\n\n[workspace]\nmembers = ["crates/a"]\n',
+      "src/main.rs": "",
+      "crates/a/Cargo.toml": "",
+      "crates/a/src/lib.rs": "",
+    },
+    (root, files) => {
+      const [format, lint] = nativeSteps({
+        root,
+        files,
+        config: { projects: [{ root: ".", profile: "rust" }] },
+      });
+      assert.deepEqual(format.command.slice(0, 3), ["cargo", "fmt", "--all"]);
+      assert.ok(lint.command.includes("--workspace"));
+      assert.ok(format.files?.includes("crates/a/src/lib.rs"));
+    },
+  );
+});
+
+await test("a warning-level compiler message is a finding, and exit 0 with one is incomplete", async () => {
+  const warning = {
+    reason: "compiler-message",
+    message: {
+      level: "warning",
+      message: "unneeded `return` statement",
+      code: { code: "clippy::needless_return" },
+      spans: [{ is_primary: true, file_name: "src/main.rs", line_start: 2, column_start: 5 }],
+    },
+  };
+  await nativeProject(
+    "rust",
+    { "Cargo.toml": "", "src/main.rs": "fn main() {}\n" },
+    async (ctx, project, root) => {
+      const run = (code: number, stdout: string) =>
+        nativeRun(
+          ctx,
+          project,
+          async (command) => {
+            if (command.at(-1) === version) {
+              return result(0, "1.0.0");
+            }
+            if (command.includes("fmt")) {
+              return result(0, `Formatting ${join(root, "src/main.rs")}\n`);
+            }
+            return result(code, stdout);
+          },
+          false,
+        );
+      const found = await run(101, lines(warning, { reason: "build-finished", success: false }));
+      assert.equal(found.diagnostics.filter((item) => item.rule === "rust.lint").length, 1);
+      assert.equal(found.coverage.find((item) => item.id === "rust.lint:.")?.status, "violation");
+      const exited = await run(0, lines(warning, { reason: "build-finished", success: true }));
+      assert.ok(
+        exited.diagnostics.some(
+          (item) => item.rule === "adapters.protocol" && item.status === "incomplete",
+        ),
+      );
+    },
+  );
+});

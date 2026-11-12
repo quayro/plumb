@@ -56,14 +56,15 @@ The JavaScript pack ships its tools as pinned dependencies. Python and Rust use 
 
 - The project root is the package or workspace root: it holds `Cargo.toml`, and `Cargo.lock` must be current, because `--frozen` neither writes it nor reaches the network.
 - rustfmt names each file it formats. A selected `.rs` file it never reaches, such as a module no target declares, is `native.scope`, incomplete: declare the module or exclude the file with a reason.
-- clippy lints what cargo compiles, so `rust.lint` answers for the project and claims no file. Each compiler or clippy error is a diagnostic with its path, line and lint name.
-- A `[lints]` table that sets `allow`, and `rustflags` in `.cargo/config.toml` that allow or cap lints, would switch findings off after `-D warnings`. Either is `native.scope`, incomplete. A `warn`, `deny` or `forbid` level is accepted: a warning is still denied.
+- clippy lints what cargo compiles, so `rust.lint` answers for the project and claims no file. Each compiler or clippy error, and each warning-level message, is a diagnostic with its path, line and lint name. Clippy compiles the project, so its build scripts and procedural macros run with the caller's permissions.
+- A `[lints]` table that sets `allow`, and `rustflags` in `.cargo/config.toml` that allow, cap or force-warn lints, would switch findings off after `-D warnings`. Either is `native.scope`, incomplete. A `warn`, `deny` or `forbid` level is accepted: a warning is still denied. A compiler wrapper (`rustc-wrapper`, `rustc-workspace-wrapper`, `[build] rustc`) is refused, because it can swallow every lint, and so is a character escape (`\x`, `\u`, `\U`) in a manifest or cargo config, because it can spell one of these words.
+- A project that is a member of an ancestor workspace is `native.scope`, incomplete: configure the workspace root as the project. A root package that is also a workspace runs `cargo clippy --workspace` and `cargo fmt --all`.
 - Build output goes to a temporary folder outside the checkout, so a check leaves the repository untouched.
 
 Suppression attributes such as `#[allow]`, `#[expect]` and `#[rustfmt::skip]`, forbidden paths and ignored tests are refused by the [Rust adapter][rust]. Without it the tools still honor those attributes.
 
 ## Limits
 
-- `RUSTFLAGS` and a cargo configuration outside the repository belong to the machine, like the tools themselves, and are not inspected.
+- `RUSTFLAGS`, a compiler wrapper in the environment and a cargo configuration outside the repository belong to the machine, like the tools themselves, and are not inspected.
 - A `clippy.toml` changes lint thresholds; it is a protected file and changes only by review.
 - Other languages are not checked. Under the `ozmikhail` preset a recognized source file that no project covers is `projects.unsupported`, incomplete, until it is excluded with a reason.

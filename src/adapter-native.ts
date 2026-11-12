@@ -67,7 +67,8 @@ function rustfmt(ctx: NativeContext, step: Step, result: RunResult): string[] {
 }
 
 // clippy exits 101 for a denied lint and for a build it could not start alike; the JSON messages
-// tell them apart.
+// tell them apart. Under -D warnings a warning-level message is a lint that a flag let through, so
+// it is a finding too, and an exit 0 that comes with one is a contradiction, hence incomplete.
 function clippy(ctx: NativeContext, step: Step, result: RunResult): Diagnostic[] {
   const messages = result.stdout
     .split("\n")
@@ -85,7 +86,7 @@ function clippy(ctx: NativeContext, step: Step, result: RunResult): Diagnostic[]
       code = at(message, "message", "code", "code");
     if (
       at(message, "reason") !== "compiler-message" ||
-      at(message, "message", "level") !== "error" ||
+      !["error", "warning"].includes(String(at(message, "message", "level"))) ||
       !span ||
       typeof text !== "string"
     ) {
