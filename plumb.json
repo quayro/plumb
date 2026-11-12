@@ -51,18 +51,7 @@
       "concepts",
       "reference",
       "architecture",
-      "decisions",
       "contributing"
-    ],
-    "kinds": [
-      {
-        "files": ["docs/decisions/*.md"],
-        "exclude": ["docs/decisions/index.md"],
-        "name": "^\\d{4}-[a-z0-9-]+\\.md$",
-        "sections": ["Status", "Context", "Decision", "Consequences"],
-        "status": ["Proposed", "Accepted", "Superseded", "Deprecated"],
-        "sequence": true
-      }
     ],
     "generated": [
       {
