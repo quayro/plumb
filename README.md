@@ -174,19 +174,22 @@ The public adapter protocol records capabilities, inputs, tool versions, coverag
 
 ## Documentation
 
-| Start here                                           | For                                                          |
-| ---------------------------------------------------- | ------------------------------------------------------------ |
-| [Getting started](docs/getting-started/index.md)     | Installation, generated hooks, and CI.                       |
-| [Guides](docs/guides/index.md)                       | Policy packs, rules, formatting, testing, and adoption.      |
-| [CLI reference](docs/reference/cli.md)               | Available commands and flags.                                |
-| [Compatibility](docs/reference/compatibility.md)     | Supported runtimes, languages, and integrations.             |
-| [Roadmap and limitations](docs/reference/roadmap.md) | Implemented capabilities and known limitations.              |
-| [Contributing](docs/contributing/index.md)           | Development workflow and testing expectations.               |
-| [AGENTS.md](AGENTS.md)                               | Instructions for coding agents contributing to Plumb itself. |
+| Start here                                              | For                                                              |
+| ------------------------------------------------------- | ---------------------------------------------------------------- |
+| [Getting started](docs/getting-started/index.md)        | Installation, generated hooks, and CI.                           |
+| [Guides](docs/guides/index.md)                          | Policy packs, rules, formatting, testing, and adoption.          |
+| [CLI reference](docs/reference/cli.md)                  | Available commands and flags.                                    |
+| [Compatibility](docs/reference/compatibility.md)        | Supported runtimes, languages, and integrations.                 |
+| [Roadmap and limitations](docs/reference/roadmap.md)    | Implemented capabilities and known limitations.                  |
+| [Contributing](docs/contributing/index.md)              | Branches, pull requests, review, merge and release.              |
+| [Commit messages](docs/guides/commits.md)               | The one-line commit policy and how to word a subject.            |
+| [CI and branch protection](docs/guides/ci.md)           | Required checks and the GitHub repository settings.              |
+| [Repository conventions](docs/reference/conventions.md) | The effective machine-checked policy of this repository.         |
+| [AGENTS.md](AGENTS.md)                                  | The boundaries every change keeps, for people and coding agents. |
 
 ## Contributing
 
-Issues, bug reproductions, policy packs, and adapters are welcome. Contributions to a rule should include passing, failing, and bypass-oriented tests. Read the [contribution guide](docs/contributing/index.md) before changing behavior.
+Issues, bug reproductions, policy packs, and adapters are welcome. Contributions to a rule should include passing, failing, and bypass-oriented tests. A change lands through a pull request that the required checks pass on, squash-merged with its title as the one commit subject. Read the [contribution guide](docs/contributing/index.md) before changing behavior.
 
 ## License
 

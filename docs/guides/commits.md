@@ -29,6 +29,44 @@ These refusals are always on and cannot be excepted:
 | `feat(api)!: drop the v1 routes`    | `fix(api): Refuse expired sessions.`         |
 | `revert(api): restore session ttl`  | `Revert "fix(api): refuse expired sessions"` |
 
+## Leave room for the merge suffix
+
+A squash-merged pull request lands on `main` as its title followed by ` (#N)`, and the check on `main` counts that suffix. Keep a title eight characters under `maxLength`, 92 by default, so the subject still fits when the pull request number has four digits.
+
+## Choose the type
+
+| Type       | Use it when the change                                                  | Example                                                  |
+| ---------- | ----------------------------------------------------------------------- | -------------------------------------------------------- |
+| `feat`     | adds behavior someone can use                                           | `feat(api): add passkey sign-in`                         |
+| `fix`      | corrects behavior that was wrong                                        | `fix(api): refuse expired sessions`                      |
+| `refactor` | changes structure and leaves behavior as it was                         | `refactor(api): split the session store from its routes` |
+| `perf`     | makes the same behavior cheaper or faster, with a measurement           | `perf(api): read a page of sessions with one query`      |
+| `test`     | changes tests or fixtures only                                          | `test(api): cover a session that expires mid-request`    |
+| `docs`     | changes documentation only                                              | `docs(api): describe session expiry`                     |
+| `build`    | changes dependencies, the toolchain, the policy or the vendored checker | `build(api): pull plumb`                                 |
+| `ci`       | changes workflows, hooks or repository automation                       | `ci(api): run the suites on pull requests`               |
+| `style`    | changes formatting only                                                 | `style(api): sort imports`                               |
+| `revert`   | undoes an earlier commit                                                | `revert(api): restore session ttl`                       |
+| `chore`    | maintains the repository and fits none of the above                     | `chore(api): ignore local editor settings`               |
+
+When a change fits two types, choose by what a reader of the release notes needs to learn: a fix that needed a refactor is a `fix`. A change that breaks a public or persisted contract carries `!` after the scope, and its pull request says what breaks and how a consumer moves.
+
+## Word the subject
+
+Say what the system does differently, in the words of the domain. Do not describe the edit.
+
+| Write                                                     | Not                                    | Why                                           |
+| --------------------------------------------------------- | -------------------------------------- | --------------------------------------------- |
+| `fix(api): refuse expired sessions`                       | `fix(api): update session check`       | Names the behavior, not the file that changed |
+| `feat(api): let an owner transfer the organization`       | `feat(api): add transfer.ts and route` | A reader learns who can now do what           |
+| `fix(api): keep page reads consistent through pagination` | `fix(api): fix bug in pagination`      | States the property that now holds            |
+| `refactor(api): remove the unreachable admission state`   | `refactor(api): cleanup`               | Says what was removed                         |
+
+- Start lowercase, use the imperative, and end without a period.
+- Use the nouns the guides use, so a reader can search the documentation for the words in the subject.
+- Leave out ticket numbers, tool names and an "and" that joins two changes. Two changes are two pull requests.
+- Name an agent's part in the pull request description. A `Co-authored-by` trailer is refused.
+
 ## Where it is enforced
 
 - **Locally.** The generated `commit-msg` hook runs `plumb commit-msg "$1"`. Git comment lines and everything below the scissors line are ignored, so `commit.verbose` works.
@@ -36,7 +74,7 @@ These refusals are always on and cannot be excepted:
 - **Pushes to `main`.** CI runs `plumb commits --range "$BEFORE..$AFTER"`, which catches anything that reached `main` without a pull request.
 - **Automated commits.** Configure bots to write a passing subject, for example Dependabot's `commit-message.prefix: "build"` with `include: scope`. Plumb has no author exemptions.
 
-`git commit --no-verify` cannot be detected locally; CI is the backstop. Squash fixups with `git rebase --autosquash` before pushing.
+`git commit --no-verify` cannot be detected locally; CI is the backstop. Fold a correction into your own unpushed commit with `git commit --amend` or an interactive rebase instead of a `fixup!` commit.
 
 ## Existing hook managers
 

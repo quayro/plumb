@@ -241,7 +241,7 @@ Knip is an optional integration, enabled by a project's `knip` setting. Knip's o
 
 ```sh
 node --test packages/javascript/test/lint-unit.test.ts
-npm run test:javascript
+bun run test:javascript
 ```
 
 The first command tests config validation, scope composition, conservative visitors and real ESM evaluation order without installing language engines. The complete pack suite requires the pinned dependencies and fails explicitly when they are absent. It includes passing/refused cases for all custom rules, TypeScript resolution, full ESLint config composition, inherited-rule enforcement and semantic contracts.
