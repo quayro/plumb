@@ -7,7 +7,6 @@ Plumb is a deterministic repository-convention checker. These pages are organize
 - [Concepts](concepts/index.md) — diagnostics, presets, exceptions and protected policy.
 - [Reference](reference/index.md) — command line and configuration reference.
 - [Architecture](architecture/index.md) — how the core, packs and adapters fit together.
-- [Decisions](decisions/index.md) — architecture decision records.
 - [Contributing](contributing/index.md) — working on Plumb itself.
 
 Agents working on Plumb start at [AGENTS.md](../AGENTS.md).
