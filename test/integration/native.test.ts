@@ -381,3 +381,61 @@ await test("the real CLI reports missing native executables as incomplete with n
     );
   }
 });
+
+await test("a TOML escape that spells an allowed lint level, or a wrapper, is incomplete", (t) => {
+  requireTools(RUST_TOOLS);
+  const linted = "fn one() -> i32 {\n    return 1;\n}\n\nfn main() {\n    let _ = one();\n}\n";
+  const escaped = rustFixture(t, { "src/main.rs": linted });
+  escaped.write("Cargo.toml", `${CARGO}\n[lints.clippy]\nneedless_return = "\\u0061llow"\n`);
+  const escapedResult = invoke(escaped.root, "check", 2);
+  assert.ok(
+    findings(escapedResult, "native.scope").some((item) => item.message.startsWith("Cargo.toml: ")),
+    JSON.stringify(escapedResult.diagnostics),
+  );
+  const wrapped = rustFixture(t, { "src/main.rs": linted });
+  wrapped.write(".cargo/config.toml", '[build]\nrustc-wrapper = "/bin/false"\n');
+  const wrappedResult = invoke(wrapped.root, "check", 2);
+  assert.ok(
+    findings(wrappedResult, "native.scope").some((item) => /compiler wrapper/.test(item.message)),
+  );
+});
+
+await test("--force-warn in rustflags is incomplete, never a pass", (t) => {
+  requireTools(RUST_TOOLS);
+  const linted = "fn one() -> i32 {\n    return 1;\n}\n\nfn main() {\n    let _ = one();\n}\n";
+  const { root, write } = rustFixture(t, { "src/main.rs": linted });
+  write(".cargo/config.toml", '[build]\nrustflags = ["--force-warn", "clippy::needless_return"]\n');
+  const result = invoke(root, "check", 2);
+  assert.ok(findings(result, "native.scope").some((item) => /force-warn/.test(item.message)));
+});
+
+await test("a member crate of an ancestor workspace is incomplete, and the workspace root is the project", (t) => {
+  requireTools(RUST_TOOLS);
+  const project = fixture(t, [{ root: "member", profile: "rust" }], {
+    "Cargo.toml": '[workspace]\nmembers = ["member"]\n',
+    "member/Cargo.toml": '[package]\nname = "member"\nversion = "0.1.0"\nedition = "2021"\n',
+    "member/src/lib.rs": "pub fn one() -> i32 {\n    1\n}\n",
+  });
+  invoke(project.root, "sync", 0);
+  const result = invoke(project.root, "check", 2);
+  assert.ok(findings(result, "native.scope").some((item) => /workspace root/.test(item.message)));
+});
+
+await test("a root package that is also a workspace lints its members, named from the workspace root", (t) => {
+  requireTools(RUST_TOOLS);
+  const project = fixture(t, [{ root: ".", profile: "rust" }], {
+    "Cargo.toml":
+      '[package]\nname = "probe"\nversion = "0.1.0"\nedition = "2021"\n\n[workspace]\nmembers = ["crates/a"]\n',
+    "src/main.rs": rustPass,
+    "crates/a/Cargo.toml": '[package]\nname = "a"\nversion = "0.1.0"\nedition = "2021"\n',
+    "crates/a/src/lib.rs": "pub fn one() -> i32 {\n    return 1;\n}\n",
+  });
+  const generated = execute(["cargo", "generate-lockfile", "--offline"], { cwd: project.root });
+  assert.equal(generated.status, 0, generated.stderr);
+  invoke(project.root, "sync", 0);
+  const result = invoke(project.root, "check", 1);
+  assert.deepEqual(
+    findings(result, "rust.lint").map((item) => [item.path, item.line, item.column]),
+    [["crates/a/src/lib.rs", 2, 5]],
+  );
+});
