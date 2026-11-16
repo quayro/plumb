@@ -1,6 +1,6 @@
 {
   "name": "@quayro/plumb",
-  "version": "26.11.11",
+  "version": "26.11.12",
   "description": "Portable, deterministic repository contracts for agentic coding",
   "license": "MIT",
   "type": "module",
